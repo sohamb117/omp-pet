@@ -11,11 +11,14 @@ scripts/build-app.sh
 open 'dist/OMP Pet.app'
 ```
 
-Start oh-my-pi with the bridge (an absolute path works from any project):
+Install the local plugin once, then start OMP from any project:
 
 ```sh
-omp -e /Users/soham/Documents/code/omp-pet/extension/index.ts
+omp install /Users/soham/Documents/code/omp-pet
+omp
 ```
+
+In an existing OMP session, run `/reload-plugins` after installation or extension edits. For one-off loading, use `omp -e /Users/soham/Documents/code/omp-pet/extension/index.ts`.
 
 The TypeScript bridge uses only Node built-ins at runtime; the OMP import is a type import. Bun is needed only for development checks. The app must be running to show updates; the extension reconnects on later events or its five-second heartbeat when the app restarts.
 
@@ -80,4 +83,4 @@ python3 scripts/petctl.py quit
 
 `python3 scripts/demo.py` sends a temporary demonstration session. `OMP_PET_SOCKET` overrides the socket in both processes. `OMP_PET_SPRITES` overrides the sprite folder; `OMP_PET_STATE` overrides the preferences file. Defaults are `/tmp/omp-pet-<uid>/events.sock` inside an owned 0700 directory and `~/Library/Application Support/OMP Pet/preferences.json`.
 
-Tests cover lifecycle/approval/error behavior through a real Unix socket, context handling, UTF-8 bounds, sequence resets on reconnect, stale socket events, independent sessions, screen geometry, palette filtering, and framing limits. Real OMP model-session use and third-party tiling utilities remain manual checks. The generated app is ad hoc signed for local use; distribution signing and launch-at-login are not configured.
+Tests cover lifecycle/approval/error behavior through a real Unix socket, context handling, UTF-8 bounds, sequence resets on reconnect, stale socket events, independent sessions, screen geometry, palette filtering, and framing limits. `python3 scripts/verify-omp.py` verifies plugin discovery and `/pet status` in the installed OMP runtime using an isolated profile and a local placeholder endpoint. It invokes no agent. Model-session use and third-party tiling utilities remain manual checks. The generated app is ad hoc signed for local use; distribution signing and launch-at-login are not configured.
