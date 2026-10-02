@@ -1,11 +1,10 @@
 import type { ExtensionAPI } from "@oh-my-pi/pi-coding-agent";
 import { execFile } from "node:child_process";
-import { access } from "node:fs/promises";
-import { fileURLToPath } from "node:url";
 import { createConnection } from "node:net";
 import { homedir } from "node:os";
 import { resolve } from "node:path";
 import { socketPath } from "./transport.ts";
+import { ensurePetApp } from "./installer.ts";
 
 type Control = string | { load_sprites: { path: string } } | { resize: { size: number } };
 export function requestControl(control: Control, path = socketPath()): Promise<Record<string, any>> {
@@ -35,9 +34,8 @@ export function requestControl(control: Control, path = socketPath()): Promise<R
     });
   });
 }
-export async function launchPet(): Promise<void> {
-  const app = process.env.OMP_PET_APP ?? fileURLToPath(new URL("../dist/OMP Pet.app", import.meta.url));
-  try { await access(app); } catch { throw new Error("Build OMP Pet.app first: scripts/build-app.sh"); }
+export async function launchPet(onProgress?: (message: string) => void): Promise<void> {
+  const app = await ensurePetApp({ onProgress });
   await new Promise<void>((resolve, reject) => execFile("/usr/bin/open", ["-g", app], error => error ? reject(error) : resolve()));
 }
 const unavailable = (error: unknown): boolean => ["ENOENT", "ECONNREFUSED"].includes((error as NodeJS.ErrnoException)?.code ?? "");
@@ -55,15 +53,22 @@ export async function showPet(
   }
   throw new Error("OMP Pet.app launched but its local socket did not become ready");
 }
-const HELP = "/pet sprites [folder] · reload · cat · reset · quit · show · tuck · size 160 · status";
+const HELP = "/pet sprites [folder] · reload · cat · reset · quit · show · tuck · size 160 · install · status";
 export function registerPetCommand(pi: ExtensionAPI): void {
   pi.registerCommand("pet", {
     description: "Configure and control your native macOS desktop pet",
-    getArgumentCompletions: prefix => ["sprites", "reload", "cat", "reset", "quit", "show", "tuck", "size", "status"]
+    getArgumentCompletions: prefix => ["sprites", "reload", "cat", "reset", "quit", "show", "tuck", "size", "install", "status"]
       .filter(value => value.startsWith(prefix)).map(value => ({ value, label: value })),
     handler: async (args, ctx) => {
       const match = args.trim().match(/^(\S+)(?:\s+([\s\S]+))?$/);
       const command = match?.[1]?.toLowerCase();
+      if (command === "install") {
+        try {
+          const app = await ensurePetApp({ onProgress: message => ctx.ui.notify(message, "info") });
+          ctx.ui.notify(`Pet installed: ${app}`, "info");
+        } catch (error) { ctx.ui.notify(error instanceof Error ? error.message : String(error), "error"); }
+        return;
+      }
       let control: Control;
       if (command === "size") {
         const size=Number(match?.[2]);
@@ -80,11 +85,11 @@ export function registerPetCommand(pi: ExtensionAPI): void {
         control = controls[command]!;
       }
       try {
-        const result = command === "show" ? await showPet() : await requestControl(control);
+        const result = command === "show" ? await showPet(requestControl, () => launchPet(message => ctx.ui.notify(message, "info"))) : await requestControl(control);
         ctx.ui.notify(command === "status" ? JSON.stringify(result, null, 2) : command === "sprites" && result.picker ? "Choose a sprite folder in the macOS dialog" : `Pet: ${command}`, "info");
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
-        ctx.ui.notify(/ENOENT|ECONNREFUSED/.test(message) ? "Pet is not running. Open OMP Pet.app first." : message, "error");
+        ctx.ui.notify(/ENOENT|ECONNREFUSED/.test(message) ? "Pet is not running. Run /pet show first." : message, "error");
       }
     },
   });
