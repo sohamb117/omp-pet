@@ -51,6 +51,8 @@ jobs:
           'dist/OMP Pet.app/Contents/MacOS/omp-pet' --help
           ditto -c -k --sequesterRsrc --keepParent 'dist/OMP Pet.app' dist/OMP-Pet-macos-arm64.zip
           (cd dist && shasum -a 256 OMP-Pet-macos-arm64.zip > SHA256SUMS)
+      - name: Smoke-test automatic app installation
+        run: bun scripts/verify-installer.ts
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: OMP-Pet-macos-arm64

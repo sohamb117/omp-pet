@@ -4,5 +4,5 @@
     "strict": true, "noEmit": true, "skipLibCheck": true,
     "types": ["bun"], "allowImportingTsExtensions": true
   },
-  "include": ["extension/**/*.ts"]
+  "include": ["extension/**/*.ts", "scripts/verify-installer.ts"]
 }

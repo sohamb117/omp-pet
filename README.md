@@ -2,25 +2,25 @@
 
 A macOS desktop pet built in Rust with native AppKit. A small TypeScript oh-my-pi extension sends session events over a private Unix socket. The companion makes no model calls and uses no webview.
 
-## Run
+## Install and run
 
-Requires macOS 12+, Xcode Command Line Tools, and Rust. Build and open the accessory app:
-
-```sh
-scripts/build-app.sh
-open 'dist/OMP Pet.app'
-```
-
-Install the local plugin once, then start OMP from any project:
+On an Apple Silicon Mac with OMP installed:
 
 ```sh
-omp install /Users/soham/Documents/code/omp-pet
-omp
+omp plugin install 'github:sohamb117/omp-pet#v0.1.1'
 ```
 
-In an existing OMP session, run `/reload-plugins` after installation or extension edits. For one-off loading, use `omp -e /Users/soham/Documents/code/omp-pet/extension/index.ts`.
+Start OMP (or run `/reload-plugins` in an existing session), then:
 
-The TypeScript bridge uses only Node built-ins at runtime; the OMP import is a type import. Bun is needed only for development checks. `/pet show` opens the app automatically and waits for its socket; `OMP_PET_APP` can override the app bundle path. The app must be running to show updates; the extension reconnects on later events or its five-second heartbeat when the app restarts.
+```text
+/pet show
+```
+
+The plugin automatically downloads its matching app release, checks its SHA-256 checksum, bundle identity/version, and code signature, and installs it under `~/Library/Application Support/OMP Pet/apps/<version>/`. No Rust toolchain, manual app download, admin rights, or environment variable is needed. Later launches reuse the cached app, including offline. `/pet install` performs installation without launching. Downloads only happen through these explicit commands; agent lifecycle hooks never download software.
+
+An already running companion is reused. `OMP_PET_APP` overrides the managed app path; a local checkout's `dist/OMP Pet.app` is also preferred for development. Unsupported Intel/Rosetta installations receive a clear error and can use a manually built app via `OMP_PET_APP`. Failed downloads can be retried with `/pet show`; partial installs are cleaned up and prior versions are preserved. The app is ad-hoc signed, not Apple notarized.
+
+The TypeScript bridge uses only Node built-ins at runtime; the OMP import is a type import. Bun is needed only for development checks. The extension reconnects on later events or its five-second heartbeat when the app restarts.
 
 Hover for task, active tools, context occupancy, and session state. Animated dots mean the agent lifecycle is active; they do not prove token generation or tool progress. The 4-point context bar uses the sprite pack's most common chromatic color, ignoring transparency and near-gray pixels. Context remains unknown when OMP cannot supply it.
 
@@ -37,7 +37,8 @@ Use the menu-bar **π** or right-click the pet for readout, session switching, a
 /pet cat                     # restore the default cat
 /pet reset                   # reset desktop placement
 /pet quit                    # quit the companion
-/pet show                    # launch the app if needed and reveal the pet
+/pet show                    # install/launch the app if needed and reveal the pet
+/pet install                 # install the app without launching it
 /pet size 160                # resize the complete widget (64–256)
 /pet status                  # show native status
 ```
@@ -67,6 +68,14 @@ Crop coordinates start at the PNG's top-left corner. Durations must be 80–2000
 The default is the native cat. No Pokémon artwork is bundled or tracked in the current source tree. The downloaded Zorua pack remains locally under `work/sprite-packs/zorua`, with source attribution and upstream credits, and can be selected with `/pet sprites /Users/soham/Documents/code/omp-pet/work/sprite-packs/zorua`. Sprite rights are separate from the app's code license.
 
 ## Development
+
+Building from source requires Xcode Command Line Tools and Rust on macOS:
+
+```sh
+scripts/build-app.sh
+omp plugin install "$PWD"
+```
+
 
 ```sh
 cargo test
