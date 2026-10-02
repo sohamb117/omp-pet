@@ -27,7 +27,7 @@ async function harness(kind = "main") {
   });
   await new Promise<void>(resolve => server.listen(process.env.OMP_PET_SOCKET!, resolve));
   const handlers = new Map<string, (event: any, ctx: ExtensionContext) => void>();
-  petExtension({ on: (name: string, fn: any) => handlers.set(name, fn), getSessionName: () => "Test session" } as unknown as ExtensionAPI);
+  petExtension({ on: (name: string, fn: any) => handlers.set(name, fn), registerCommand: () => {}, getSessionName: () => "Test session" } as unknown as ExtensionAPI);
   let id = "first";
   let usage: any = { tokens: 420, contextWindow: 1000, percent: 42 };
   const ctx = { agent: { kind }, cwd: "/tmp/example", sessionManager: { getSessionId: () => id },

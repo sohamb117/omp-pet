@@ -1,9 +1,11 @@
 import type { ExtensionAPI, ExtensionContext } from "@oh-my-pi/pi-coding-agent";
+import { registerPetCommand } from "./commands.ts";
 import { basename } from "node:path";
 import { bounded, type Activity, type Snapshot } from "./protocol.ts";
 import { PetConnection } from "./transport.ts";
 
 export default function petExtension(pi: ExtensionAPI): void {
+  registerPetCommand(pi);
   // Factories are rebound for subagents; nothing mutable lives at module scope.
   let connection: PetConnection | null = null;
   let context: ExtensionContext | null = null;
