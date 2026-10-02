@@ -62,10 +62,7 @@ define_class!(
                 draw_pet(self.ivars());
                 NSGraphicsContext::restoreGraphicsState_class();
                 if self.ivars().hovered.get() {
-                let grip=NSBezierPath::bezierPath(); grip.setLineWidth(1.2);
-                for d in [4.,8.] { grip.moveToPoint(NSPoint::new(self.bounds().size.width-3.-d,3.));
-                    grip.lineToPoint(NSPoint::new(self.bounds().size.width-3.,3.+d)); }
-                color(0.95,0.95,0.95,0.8).setStroke(); grip.stroke();
+                    oval(rect(self.bounds().size.width-6.,3.,3.,3.), &color(0.75,0.75,0.75,0.35));
                 }
             }
         }
