@@ -1,4 +1,5 @@
 mod model;
+mod sessions;
 mod native;
 
 fn main() {
