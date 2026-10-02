@@ -1,0 +1,80 @@
+{
+  "recorded_at": "2026-10-02T03:33:53-0400",
+  "platform": "macOS-26.3-arm64-arm-64bit",
+  "architecture": "arm64",
+  "commit": "b55d50ceb233dcc8931a892d89f95a296ef422be",
+  "sprite_pack": "zorua",
+  "widget_size": 64.0,
+  "scenarios": [
+    {
+      "scenario": "visible_idle",
+      "seconds": 15.01,
+      "cpu_percent_one_core": 1.018,
+      "rss_mib_mean": 74.54,
+      "rss_mib_peak": 74.56,
+      "ipc_ms_median": 0.87,
+      "expected_state_observed": true,
+      "animation_running": true,
+      "edge_watch": false
+    },
+    {
+      "scenario": "visible_working",
+      "seconds": 15.0,
+      "cpu_percent_one_core": 2.196,
+      "rss_mib_mean": 74.72,
+      "rss_mib_peak": 74.78,
+      "ipc_ms_median": 1.03,
+      "expected_state_observed": true,
+      "animation_running": true,
+      "edge_watch": false
+    },
+    {
+      "scenario": "readout_working",
+      "seconds": 15.0,
+      "cpu_percent_one_core": 2.172,
+      "rss_mib_mean": 74.7,
+      "rss_mib_peak": 74.83,
+      "ipc_ms_median": 1.3,
+      "expected_state_observed": true,
+      "animation_running": true,
+      "edge_watch": false
+    },
+    {
+      "scenario": "tucked_working",
+      "seconds": 15.01,
+      "cpu_percent_one_core": 1.089,
+      "rss_mib_mean": 73.74,
+      "rss_mib_peak": 73.75,
+      "ipc_ms_median": 1.39,
+      "expected_state_observed": true,
+      "animation_running": false,
+      "edge_watch": true
+    }
+  ],
+  "method": "Release process: delta user+system CPU / monotonic wall time; 1 Hz self-reported Mach RSS. 100% CPU = one core. Includes status polling overhead. RSS includes shared pages; this is not private footprint, GPU, energy, or whole-system usage.",
+  "binary_bytes": 750496,
+  "notes": [
+    "One 15-second sample per scenario; indicative local measurements, not statistical confidence bounds.",
+    "Native companion only; excludes the OMP host process, GPU, and WindowServer.",
+    "All scenarios passed per-sample visibility, activity, and widget-size validation."
+  ],
+  "quiet_followup": {
+    "method": "Freshly restarted app; idle state; only start/end status requests over 15 seconds, no synthetic events or in-window polling. Not directly comparable to the warmed, 1 Hz working-update scenarios.",
+    "scenarios": [
+      {
+        "scenario": "idle_visible",
+        "cpu_percent_one_core": 1.905,
+        "rss_mib": 43.27,
+        "seconds": 15.01,
+        "valid": true
+      },
+      {
+        "scenario": "idle_tucked",
+        "cpu_percent_one_core": 0.168,
+        "rss_mib": 43.34,
+        "seconds": 15.0,
+        "valid": true
+      }
+    ]
+  }
+}

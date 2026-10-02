@@ -100,3 +100,7 @@ To prepare a release, update both Cargo.toml and package.json to the same versio
 With the release app running, execute `python3 scripts/benchmark.py --seconds 20`. It measures visible idle animation, working animation, visible readout, and tucked operation without invoking a model, and writes `work/benchmark.json`. Avoid interacting with the pet during sampling. It temporarily displays a synthetic task and restores visibility afterward. Restarting clears the completed benchmark session.
 
 CPU is delta process user + system time divided by elapsed wall time (100% = one CPU core). Memory is sampled resident set size, including shared pages; it is not private footprint or total macOS compositor usage. The 1 Hz status polling and synthetic task updates are included. The current sprite pack and widget size are recorded, so compare like-for-like. Counters are queried only by `/pet status`; there is no background telemetry collection.
+
+Measured example: [macOS ARM64, Zorua, October 2 2026](benchmarks/macos-arm64-2026-10-02.json): approximately 1.0% of one CPU core idle, 2.2% working, 1.1% tucked, and 74–75 MiB RSS at the recorded widget size. These are single 15-second samples of the native companion, including measurement overhead; they exclude OMP, GPU, and WindowServer.
+
+A separate quiet idle check after restart (no synthetic updates or polling between endpoints) measured 1.9% CPU visible and 0.17% tucked, with about 43 MiB RSS. This shows the effect of workload and measurement conditions; do not treat either run as an exact battery-life prediction.
