@@ -1,6 +1,7 @@
 mod geometry;
 mod hover;
 mod ipc;
+mod metrics;
 mod model;
 mod native;
 mod palette;

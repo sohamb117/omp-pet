@@ -856,7 +856,7 @@ define_class!(
     impl Delegate {
         #[unsafe(method(toggleReadout:))]
         fn toggle_readout(&self,_sender:Option<&AnyObject>) { with_ui(|ui| {
-            ui.readout_pinned=!ui.readout_pinned;
+            ui.readout_pinned = !ui.readout_pinned;
             if ui.readout_pinned { ui.show_readout(); } else { ui.card.orderOut(None); }
             ui.refresh();
         }); }
@@ -976,6 +976,7 @@ pub fn event(event: Event) {
                     Control::Status => {}
                 }
                 let status = serde_json::json!({"ok":error.is_none(),"error":error,"pid":std::process::id(),
+                    "process_usage":crate::metrics::process_usage(),
                     "tucked":ui.view.ivars().tucked.get(),"hover_revealed":ui.hover_reveal.active(),"grip_visible":ui.view.ivars().hovered.get(),"readout":ui.card.isVisible(),"readout_pinned":ui.readout_pinned,
                     "edge_watch":ui.edge_watch.is_some(),"cursor":cursor(),"animation_running":ui.animation.is_some(),
                     "sprite_viewbox": {"width":ui.placement.size,"height":ui.placement.size},
