@@ -1,8 +1,10 @@
 mod geometry;
 mod ipc;
 mod model;
+mod preferences;
 mod native;
 mod sessions;
+mod sprites;
 
 fn main() {
     let args: Vec<_> = std::env::args().skip(1).collect();
