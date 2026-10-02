@@ -3,8 +3,8 @@ set -eu
 cd "$(dirname "$0")/.."
 profile="${1:-release}"
 case "$profile" in
-  release) cargo build --release ;;
-  debug) cargo build ;;
+  release) cargo build --locked --release ;;
+  debug) cargo build --locked ;;
   *) printf 'Usage: %s [release|debug]\n' "$0" >&2; exit 2 ;;
 esac
 app="$PWD/dist/OMP Pet.app"
@@ -28,5 +28,7 @@ cat > "$app/Contents/Info.plist" <<'PLIST'
 <key>NSHighResolutionCapable</key><true/>
 </dict></plist>
 PLIST
+version=$(python3 -c 'import tomllib; print(tomllib.load(open("Cargo.toml", "rb"))["package"]["version"])')
+/usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $version" "$app/Contents/Info.plist"
 codesign --force --sign - "$app"
 printf '%s\n' "$app"

@@ -26,7 +26,7 @@ Hover for task, active tools, context occupancy, and session state. Animated dot
 
 Drag the pet near any screen edge to dock it. Tucking happens only when selected with `/pet tuck` or the interaction menu. The tucked state is a 3-point line; hold the cursor at that screen segment (including nearby corners) for 200 ms to reveal it. The line sits on the physical display edge; reveal detection includes Dock and menu-bar insets. Hover reveal is temporary: leaving the pet, readout, and edge for 350 ms tucks it again. A lightweight cursor watcher runs while tucked or temporarily revealed to catch missed edge mouse events. Freely placed pets never tuck automatically. Explicit reveal or `/pet show` keeps the pet visible. Placement and sprite choice persist across restarts. The pet and task card are nonactivating fixed-size panels with native tiling exclusion.
 
-Use the menu-bar **π** or right-click the pet for readout, session switching, and tuck/reveal. The bottom-right resize grip appears only while hovering over the pet. Drag the grip or Option-drag anywhere on the pet to resize it. Size is saved across restarts, and the readout scales with the widget. The readout has tight margins and an opaque palette-matched background.
+Use the menu-bar **π** or right-click the pet for readout, session switching, and tuck/reveal. The bottom-right resize grip appears only while hovering over the pet. Drag the grip or Option-drag anywhere on the pet to resize it. Size is saved across restarts, and the readout scales with the widget. The readout sits above the pet, stays within the screen, and has tight margins with a palette-matched background at 70% opacity.
 
 **Pin readout** keeps the hover card open while the pet is visible; its three fields are project, current step/status, and used tokens plus percent. The card uses the pet palette. Configuration and lifecycle controls are OMP slash commands:
 
@@ -88,3 +88,15 @@ python3 scripts/petctl.py quit
 `python3 scripts/demo.py` sends a temporary demonstration session. `OMP_PET_SOCKET` overrides the socket in both processes. `OMP_PET_SPRITES` overrides the sprite folder; `OMP_PET_STATE` overrides the preferences file. Defaults are `/tmp/omp-pet-<uid>/events.sock` inside an owned 0700 directory and `~/Library/Application Support/OMP Pet/preferences.json`.
 
 Tests cover lifecycle/approval/error behavior through a real Unix socket, context handling, UTF-8 bounds, sequence resets on reconnect, stale socket events, independent sessions, screen geometry, palette filtering, and framing limits. `python3 scripts/verify-omp.py` verifies plugin discovery and `/pet status` in the installed OMP runtime using an isolated profile and a local placeholder endpoint. It invokes no agent. Model-session use and third-party tiling utilities remain manual checks. The generated app is ad hoc signed for local use; distribution signing and launch-at-login are not configured.
+
+## CI and releases
+
+GitHub Actions runs on pushes to `main`, pull requests, and manual dispatches. It checks Rust formatting, Clippy, Rust tests, TypeScript types, and plugin tests, then builds and verifies the Apple Silicon app. Every successful run provides an `OMP-Pet-macos-arm64` ZIP artifact plus SHA-256 checksum, retained for 14 days. The app defaults to the native cat; no custom sprite art is packaged.
+
+To prepare a release, update both Cargo.toml and package.json to the same version and push a matching `vX.Y.Z` tag. After all checks pass, the same workflow creates a **draft** GitHub release with the app ZIP and checksum. Review and publish the draft in GitHub. These builds are ad-hoc signed, not Apple notarized; distribution with Developer ID signing/notarization requires an Apple Developer certificate and credentials, which are not configured.
+
+## Resource benchmark
+
+With the release app running, execute `python3 scripts/benchmark.py --seconds 20`. It measures visible idle animation, working animation, visible readout, and tucked operation without invoking a model, and writes `work/benchmark.json`. Avoid interacting with the pet during sampling. It temporarily displays a synthetic task and restores visibility afterward. Restarting clears the completed benchmark session.
+
+CPU is delta process user + system time divided by elapsed wall time (100% = one CPU core). Memory is sampled resident set size, including shared pages; it is not private footprint or total macOS compositor usage. The 1 Hz status polling and synthetic task updates are included. The current sprite pack and widget size are recorded, so compare like-for-like. Counters are queried only by `/pet status`; there is no background telemetry collection.
