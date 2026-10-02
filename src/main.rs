@@ -1,6 +1,7 @@
 mod geometry;
 mod ipc;
 mod model;
+mod palette;
 mod preferences;
 mod native;
 mod sessions;

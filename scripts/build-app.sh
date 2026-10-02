@@ -8,7 +8,8 @@ case "$profile" in
   *) printf 'Usage: %s [release|debug]\n' "$0" >&2; exit 2 ;;
 esac
 app="$PWD/dist/OMP Pet.app"
-mkdir -p "$app/Contents/MacOS"
+mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
+cp -R assets/zorua "$app/Contents/Resources/"
 cp "target/$profile/omp-pet" "$app/Contents/MacOS/omp-pet"
 cat > "$app/Contents/Info.plist" <<'PLIST'
 <?xml version="1.0" encoding="UTF-8"?>

@@ -18,7 +18,7 @@ fn with_ui(f: impl FnOnce(&mut AppUi)) {
 #[derive(Default)]
 struct PetIvars {
     phase: Cell<usize>, activity: Cell<Activity>, context: RefCell<Option<ContextUsage>>,
-    tucked: Cell<bool>, sprites: RefCell<Option<SpritePack>>,
+    tucked: Cell<bool>, celebrate:Cell<bool>, sprites: RefCell<Option<SpritePack>>,
 }
 
 define_class!(
@@ -85,6 +85,14 @@ define_class!(
     }
 );
 
+fn default_sprite_path() -> Option<std::path::PathBuf> {
+    let bundle=objc2_foundation::NSBundle::mainBundle();
+    let packaged=bundle.resourcePath().map(|p|std::path::PathBuf::from(p.to_string()).join("zorua"));
+    packaged.filter(|p|p.join("manifest.json").is_file()).or_else(|| {
+        let local=std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("assets/zorua");
+        local.join("manifest.json").is_file().then_some(local)
+    })
+}
 fn cursor() -> Point { let p=NSEvent::mouseLocation(); Point { x:p.x,y:p.y } }
 fn cancel(timer:&mut Option<Retained<NSTimer>>) { if let Some(t)=timer.take() { t.invalidate(); } }
 fn screen_at(p:Point,mtm:MainThreadMarker) -> Rect {
@@ -109,7 +117,7 @@ fn oval(bounds:NSRect,fill:&NSColor) {
 fn draw_pet(ivars:&PetIvars) {
     let ink=color(0.10,0.13,0.18,1.); let mint=color(0.64,0.89,0.77,1.);
     if let Some(pack)=ivars.sprites.borrow().as_ref() {
-        pack.draw(ivars.activity.get(),ivars.phase.get(),rect(16.,24.,80.,76.));
+        pack.draw(ivars.activity.get(),ivars.phase.get(),ivars.celebrate.get(),rect(16.,24.,80.,76.));
     } else {
     oval(rect(23.,19.,67.,9.), &color(0.,0.,0.,0.12));
     rounded(rect(26.,27.,62.,58.),23.,&ink);
@@ -121,10 +129,11 @@ fn draw_pet(ivars:&PetIvars) {
     oval(rect(34.,47.,9.,5.),&color(0.96,0.62,0.64,0.75));
     oval(rect(73.,47.,9.,5.),&color(0.96,0.62,0.64,0.75));
     }
-    rounded(rect(29.,12.,54.,5.),2.5,&color(0.10,0.13,0.18,0.35));
+    rounded(rect(29.,13.,54.,2.),1.,&color(0.10,0.13,0.18,0.35));
     if let Some(c)=ivars.context.borrow().as_ref() {
-        let fill=if c.percent >= 85. { color(0.96,0.66,0.35,1.) } else { mint.clone() };
-        rounded(rect(29.,12.,54.*c.percent/100.,5.),2.5,&fill);
+        let rgb=ivars.sprites.borrow().as_ref().map_or(crate::palette::FALLBACK,|pack|pack.accent);
+        let fill=color(rgb[0] as f64/255.,rgb[1] as f64/255.,rgb[2] as f64/255.,1.);
+        rounded(rect(29.,13.,54.*c.percent/100.,2.),1.,&fill);
     }
     let activity=ivars.activity.get();
     if activity != Activity::Idle {
@@ -188,7 +197,7 @@ impl AppUi {
         view.setAccessibilityRole(Some(unsafe { NSAccessibilityImageRole }));
         view.setAccessibilityLabel(Some(&NSString::from_str("OMP Pet desktop companion")));
         pet.setAcceptsMouseMovedEvents(true);
-        if let Some(path)=std::env::var_os("OMP_PET_SPRITES").map(std::path::PathBuf::from).or(prefs.sprites) {
+        if let Some(path)=std::env::var_os("OMP_PET_SPRITES").map(std::path::PathBuf::from).or(prefs.sprites).or_else(default_sprite_path) {
             match SpritePack::load(&path,mtm) {
                 Ok(pack) => *view.ivars().sprites.borrow_mut()=Some(pack),
                 Err(e) => eprintln!("Could not load sprite pack: {e}"),
@@ -225,7 +234,14 @@ impl AppUi {
         ui
     }
     fn refresh(&mut self) {
-        let activity=self.sessions.activity(); self.view.ivars().activity.set(activity);
+        let activity=self.sessions.activity();
+        let previous=self.view.ivars().activity.replace(activity);
+        if previous != activity {
+            cancel(&mut self.animation); self.view.ivars().phase.set(0);
+            let celebrate=previous==Activity::Working && activity==Activity::Idle
+                && self.view.ivars().sprites.borrow().as_ref().is_some_and(|p|p.has_celebration());
+            self.view.ivars().celebrate.set(celebrate);
+        }
         *self.view.ivars().context.borrow_mut()=self.sessions.current().and_then(|s| s.snapshot.context.clone());
         let (project,task,tool,context,footer)=if let Some(s)=self.sessions.current() {
             (format!("{} · {}",s.snapshot.project,activity.label()),s.snapshot.task.clone(),
@@ -246,12 +262,19 @@ impl AppUi {
     fn sync_animation(&mut self) {
         let activity=self.sessions.activity();
         let custom=self.view.ivars().sprites.borrow().as_ref().is_some_and(|pack|pack.animated(activity));
-        let active=(activity.animates() || custom) && !self.view.ivars().tucked.get();
+        let active=(activity.animates() || custom || self.view.ivars().celebrate.get()) && !self.view.ivars().tucked.get();
         if active && self.animation.is_none() {
-            let interval=self.view.ivars().sprites.borrow().as_ref().map_or(0.33,|pack|pack.frame_ms as f64/1000.);
-            self.animation=Some(timer(interval,true,|| with_ui(|ui| {
-                let p=ui.view.ivars().phase.get(); ui.view.ivars().phase.set(p.wrapping_add(1));
-                ui.view.setNeedsDisplay(true);
+            let index=self.view.ivars().phase.get();
+            let interval=self.view.ivars().sprites.borrow().as_ref().map_or(0.33,|pack|
+                pack.duration(activity,index,self.view.ivars().celebrate.get()) as f64/1000.);
+            self.animation=Some(timer(interval,false,|| with_ui(|ui| {
+                ui.animation.take();
+                let next=ui.view.ivars().phase.get().wrapping_add(1);
+                let finished=ui.view.ivars().celebrate.get() && ui.view.ivars().sprites.borrow().as_ref()
+                    .is_some_and(|pack|next>=pack.celebration_frames());
+                if finished { ui.view.ivars().celebrate.set(false); ui.view.ivars().phase.set(0); }
+                else { ui.view.ivars().phase.set(next); }
+                ui.view.setNeedsDisplay(true); ui.sync_animation();
             })));
         } else if !active {
             if let Some(timer)=self.animation.take() { timer.invalidate(); }
