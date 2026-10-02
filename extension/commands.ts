@@ -1,4 +1,7 @@
 import type { ExtensionAPI } from "@oh-my-pi/pi-coding-agent";
+import { execFile } from "node:child_process";
+import { access } from "node:fs/promises";
+import { fileURLToPath } from "node:url";
 import { createConnection } from "node:net";
 import { homedir } from "node:os";
 import { resolve } from "node:path";
@@ -32,6 +35,26 @@ export function requestControl(control: Control, path = socketPath()): Promise<R
     });
   });
 }
+export async function launchPet(): Promise<void> {
+  const app = process.env.OMP_PET_APP ?? fileURLToPath(new URL("../dist/OMP Pet.app", import.meta.url));
+  try { await access(app); } catch { throw new Error("Build OMP Pet.app first: scripts/build-app.sh"); }
+  await new Promise<void>((resolve, reject) => execFile("/usr/bin/open", ["-g", app], error => error ? reject(error) : resolve()));
+}
+const unavailable = (error: unknown): boolean => ["ENOENT", "ECONNREFUSED"].includes((error as NodeJS.ErrnoException)?.code ?? "");
+export async function showPet(
+  request = requestControl,
+  launch = launchPet,
+  wait = () => new Promise<void>(resolve => setTimeout(resolve, 100)),
+): Promise<Record<string, any>> {
+  try { return await request("show_pet"); } catch (error) { if (!unavailable(error)) throw error; }
+  await launch();
+  const deadline = Date.now() + 10_000;
+  while (Date.now() < deadline) {
+    try { return await request("show_pet"); } catch (error) { if (!unavailable(error)) throw error; }
+    await wait();
+  }
+  throw new Error("OMP Pet.app launched but its local socket did not become ready");
+}
 const HELP = "/pet sprites [folder] · reload · cat · reset · quit · show · tuck · status";
 export function registerPetCommand(pi: ExtensionAPI): void {
   pi.registerCommand("pet", {
@@ -48,12 +71,12 @@ export function registerPetCommand(pi: ExtensionAPI): void {
         if (path?.startsWith("~/")) path = resolve(homedir(), path.slice(2));
         control = path ? { load_sprites: { path: resolve(ctx.cwd, path) } } : "choose_sprites";
       } else {
-        const controls: Record<string, string> = { reload: "reload_sprites", cat: "use_cat", reset: "reset_placement", quit: "quit", show: "readout", tuck: "tuck", status: "status" };
+        const controls: Record<string, string> = { reload: "reload_sprites", cat: "use_cat", reset: "reset_placement", quit: "quit", show: "show_pet", tuck: "tuck", status: "status" };
         if (!command || !controls[command]) { ctx.ui.notify(HELP, "info"); return; }
         control = controls[command]!;
       }
       try {
-        const result = await requestControl(control);
+        const result = command === "show" ? await showPet() : await requestControl(control);
         ctx.ui.notify(command === "status" ? JSON.stringify(result, null, 2) : command === "sprites" && result.picker ? "Choose a sprite folder in the macOS dialog" : `Pet: ${command}`, "info");
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
