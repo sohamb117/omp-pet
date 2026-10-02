@@ -54,11 +54,21 @@ define_class!(
                 let rgb=self.ivars().sprites.borrow().as_ref().map_or(crate::palette::FALLBACK,|p|p.accent);
                 rounded(self.bounds(), 1.5, &color(rgb[0] as f64/255.,rgb[1] as f64/255.,rgb[2] as f64/255.,0.9));
             } else {
+                NSGraphicsContext::saveGraphicsState_class();
+                let transform=objc2_foundation::NSAffineTransform::transform();
+                transform.scaleBy(self.bounds().size.width/PET_SIZE); transform.concat();
                 draw_pet(self.ivars());
+                NSGraphicsContext::restoreGraphicsState_class();
+                let grip=NSBezierPath::bezierPath(); grip.setLineWidth(1.2);
+                for d in [4.,8.] { grip.moveToPoint(NSPoint::new(self.bounds().size.width-3.-d,3.));
+                    grip.lineToPoint(NSPoint::new(self.bounds().size.width-3.,3.+d)); }
+                color(0.95,0.95,0.95,0.8).setStroke(); grip.stroke();
             }
         }
         #[unsafe(method(mouseDown:))]
-        fn mouse_down(&self, _event: &NSEvent) { with_ui(|ui| ui.begin_drag()); }
+        fn mouse_down(&self, event: &NSEvent) { with_ui(|ui| {
+            if ui.resize_hit(cursor()) || event.modifierFlags().contains(NSEventModifierFlags::Option) { ui.begin_resize(); } else { ui.begin_drag(); }
+        }); }
         #[unsafe(method(mouseDragged:))]
         fn mouse_dragged(&self, _event: &NSEvent) { with_ui(|ui| ui.drag()); }
         #[unsafe(method(mouseUp:))]
@@ -116,7 +126,7 @@ define_class!(
         #[unsafe(method(drawRect:))]
         fn draw(&self, _rect: NSRect) {
             let c=self.ivars().accent.get();
-            rounded(self.bounds(),12.,&color(c[0] as f64/255.*0.45,c[1] as f64/255.*0.45,c[2] as f64/255.*0.45,0.98));
+            rounded(self.bounds(),8.,&color(c[0] as f64/255.*0.45,c[1] as f64/255.*0.45,c[2] as f64/255.*0.45,1.));
         }
     }
 );
@@ -281,7 +291,6 @@ struct AppUi {
     card: Retained<PetPanel>,
     labels: Vec<Retained<NSTextField>>,
     card_view: Retained<CardView>,
-    visible_until: Option<std::time::Instant>,
     menu: Retained<NSMenu>,
     _status: Retained<NSStatusItem>,
     sessions: Sessions,
@@ -289,8 +298,9 @@ struct AppUi {
     animation: Option<Retained<NSTimer>>,
     readout_pinned: bool,
     reveal_timer: Option<Retained<NSTimer>>,
-    hide_timer: Option<Retained<NSTimer>>,
     drag_offset: Option<Point>,
+    resize_start: Option<(Point, Placement)>,
+    reveal_armed: bool,
     monitors: Vec<Retained<AnyObject>>,
     edge_watch: Option<Retained<NSTimer>>,
 }
@@ -310,6 +320,7 @@ impl AppUi {
             },
             mtm,
         );
+        placement.size = placement.size.clamp(64., 256.);
         placement.align();
         let pet = panel(mtm, nsrect(placement.frame(false)), "OMP Pet");
         let view = PetView::new(mtm);
@@ -327,14 +338,14 @@ impl AppUi {
                 Err(e) => eprintln!("Could not load sprite pack: {e}"),
             }
         }
-        let card = panel(mtm, rect(0., 0., 280., 116.), "OMP Pet — task readout");
+        let card = panel(mtm, rect(0., 0., 200., 76.), "OMP Pet — task readout");
         let card_alloc = CardView::alloc(mtm).set_ivars(CardIvars::default());
         let content: Retained<CardView> =
-            unsafe { msg_send![super(card_alloc),initWithFrame:rect(0.,0.,280.,116.)] };
+            unsafe { msg_send![super(card_alloc),initWithFrame:rect(0.,0.,200.,76.)] };
         let mut labels = Vec::new();
-        for (y, height, size) in [(88., 16., 11.), (39., 38., 14.), (12., 18., 12.)] {
+        for (y, height, size) in [(55., 14., 10.), (28., 22., 11.), (6., 14., 10.)] {
             let label = NSTextField::labelWithString(&NSString::from_str(""), mtm);
-            label.setFrame(rect(18., y, 244., height));
+            label.setFrame(rect(8., y, 184., height));
             label.setFont(Some(&NSFont::systemFontOfSize(size)));
             label.setTextColor(Some(&color(0.90, 0.94, 0.96, 1.)));
             label.setMaximumNumberOfLines(if height > 20. { 2 } else { 1 });
@@ -375,7 +386,6 @@ impl AppUi {
             card,
             labels,
             card_view: content,
-            visible_until: None,
             menu,
             _status: status,
             sessions,
@@ -383,11 +393,13 @@ impl AppUi {
             animation: None,
             readout_pinned: readout,
             reveal_timer: None,
-            hide_timer: None,
             drag_offset: None,
+            resize_start: None,
+            reveal_armed: true,
             monitors: Vec::new(),
             edge_watch: None,
         };
+        ui.layout_card();
         ui.refresh();
         ui.sync_edge_watch();
         ui.pet.orderFrontRegardless();
@@ -582,16 +594,19 @@ impl AppUi {
     }
     // Mouse monitors can miss transitions at a desktop edge. Check only while docked.
     fn sync_edge_watch(&mut self) {
-        if self.placement.edge.is_some() && self.edge_watch.is_none() {
+        if self.placement.edge.is_some()
+            && self.view.ivars().tucked.get()
+            && self.edge_watch.is_none()
+        {
             self.edge_watch = Some(timer(0.125, true, || with_ui(|ui| ui.pointer_moved())));
-        } else if self.placement.edge.is_none() {
+        } else if self.placement.edge.is_none() || !self.view.ivars().tucked.get() {
             cancel(&mut self.edge_watch);
         }
     }
     fn physical_screen(&self) -> Rect {
         let center = Point {
-            x: self.placement.origin.x + PET_SIZE / 2.,
-            y: self.placement.origin.y + PET_SIZE / 2.,
+            x: self.placement.origin.x + self.placement.size / 2.,
+            y: self.placement.origin.y + self.placement.size / 2.,
         };
         let screens = NSScreen::screens(self.pet.mtm());
         screens
@@ -607,11 +622,19 @@ impl AppUi {
                 .contains(p)
     }
     fn pointer_moved(&mut self) {
-        if self.drag_offset.is_some() {
+        if self.drag_offset.is_some() || self.resize_start.is_some() {
             return;
         }
         let p = cursor();
         if self.view.ivars().tucked.get() {
+            if !self.edge_hit(p) {
+                self.reveal_armed = true;
+                cancel(&mut self.reveal_timer);
+                return;
+            }
+            if !self.reveal_armed {
+                return;
+            }
             if self.edge_hit(p) && NSEvent::pressedMouseButtons() == 0 {
                 if self.reveal_timer.is_none() {
                     self.reveal_timer = Some(timer(0.20, false, || {
@@ -631,37 +654,11 @@ impl AppUi {
         }
         let pet_hit = self.placement.frame(false).contains(p);
         let card_hit = self.card.isVisible() && rustrect(self.card.frame()).contains(p);
-        // Empty space around the sprite lets clicks reach the application below it.
-        let local = Point {
-            x: p.x - self.placement.origin.x,
-            y: p.y - self.placement.origin.y,
-        };
-        let sprite_hit = Rect {
-            x: 0.,
-            y: 0.,
-            w: PET_SIZE,
-            h: PET_SIZE,
-        }
-        .contains(local)
-            || Rect {
-                x: 77.,
-                y: 77.,
-                w: 32.,
-                h: 23.,
-            }
-            .contains(local)
-            || Rect {
-                x: 29.,
-                y: 12.,
-                w: 54.,
-                h: 5.,
-            }
-            .contains(local);
+        let sprite_hit = pet_hit;
         if self.pet.ignoresMouseEvents() == sprite_hit {
             self.pet.setIgnoresMouseEvents(!sprite_hit);
         }
         if pet_hit || card_hit || self.edge_hit(p) {
-            cancel(&mut self.hide_timer);
             if pet_hit && !self.card.isVisible() {
                 self.refresh();
                 self.show_readout();
@@ -670,31 +667,14 @@ impl AppUi {
             if !self.readout_pinned && self.card.isVisible() {
                 self.card.orderOut(None);
             }
-            if self.placement.edge.is_some()
-                && self.hide_timer.is_none()
-                && self
-                    .visible_until
-                    .is_none_or(|until| std::time::Instant::now() >= until)
-            {
-                self.hide_timer = Some(timer(0.8, false, || {
-                    with_ui(|ui| {
-                        ui.hide_timer.take();
-                        let p = cursor();
-                        if !ui.edge_hit(p)
-                            && !ui.placement.frame(false).contains(p)
-                            && !(ui.card.isVisible() && rustrect(ui.card.frame()).contains(p))
-                        {
-                            ui.set_tucked(true);
-                        }
-                    })
-                }));
-            }
         }
     }
     fn set_tucked(&mut self, tucked: bool) {
         cancel(&mut self.reveal_timer);
-        cancel(&mut self.hide_timer);
         self.view.ivars().tucked.set(tucked);
+        if tucked {
+            self.reveal_armed = !self.edge_hit(cursor());
+        }
         self.pet.setIgnoresMouseEvents(false);
         let frame = nsrect(if tucked {
             self.placement.tucked_frame(self.physical_screen())
@@ -711,6 +691,7 @@ impl AppUi {
         self.view.setNeedsDisplay(true);
     }
     fn begin_drag(&mut self) {
+        self.readout_pinned = false;
         self.set_tucked(false);
         self.card.orderOut(None);
         let p = cursor();
@@ -720,6 +701,17 @@ impl AppUi {
         });
     }
     fn drag(&mut self) {
+        if let Some((start, initial)) = self.resize_start {
+            let p = cursor();
+            let size = (initial.size + (p.x - start.x - (p.y - start.y)) / 2.).clamp(64., 256.);
+            self.placement = initial;
+            self.placement.size = size;
+            self.placement.origin.y = initial.origin.y + initial.size - size;
+            self.placement.align();
+            self.set_tucked(false);
+            self.layout_card();
+            return;
+        }
         if let Some(offset) = self.drag_offset {
             let p = cursor();
             self.placement.origin = Point {
@@ -734,6 +726,11 @@ impl AppUi {
         }
     }
     fn end_drag(&mut self) {
+        if self.resize_start.take().is_some() {
+            self.save_preferences();
+            self.refresh();
+            return;
+        }
         if self.drag_offset.take().is_some() {
             self.placement
                 .snap(self.placement.origin, screen_at(cursor(), self.pet.mtm()));
@@ -742,21 +739,71 @@ impl AppUi {
             self.pointer_moved();
         }
     }
+    fn resize_hit(&self, p: Point) -> bool {
+        !self.view.ivars().tucked.get()
+            && Rect {
+                x: self.placement.origin.x + self.placement.size - 14.,
+                y: self.placement.origin.y,
+                w: 14.,
+                h: 14.,
+            }
+            .contains(p)
+    }
+    fn begin_resize(&mut self) {
+        self.readout_pinned = false;
+        self.resize_start = Some((cursor(), self.placement));
+        self.card.orderOut(None);
+    }
+    fn resize_widget(&mut self, size: f64) -> Result<(), String> {
+        if !size.is_finite() || !(64. ..=256.).contains(&size) {
+            return Err("Pet size must be 64–256".into());
+        }
+        self.placement.size = size;
+        self.placement.align();
+        self.set_tucked(false);
+        self.layout_card();
+        self.refresh();
+        self.save_preferences();
+        Ok(())
+    }
+    fn card_scale(&self) -> f64 {
+        (self.placement.size / PET_SIZE).max(0.8)
+    }
+    fn layout_card(&self) {
+        let k = self.card_scale();
+        let size = NSSize::new(200. * k, 76. * k);
+        self.card.setContentMinSize(NSSize::new(0., 0.));
+        self.card.setContentMaxSize(size);
+        self.card.setContentMinSize(size);
+        self.card.setContentSize(size);
+        for (label, (y, h, font)) in
+            self.labels
+                .iter()
+                .zip([(55., 14., 10.), (28., 22., 11.), (6., 14., 10.)])
+        {
+            label.setFrame(rect(8. * k, y * k, 184. * k, h * k));
+            label.setFont(Some(&NSFont::systemFontOfSize(font * k)));
+        }
+    }
     fn show_readout(&self) {
         let p = self.placement.origin;
         let screen = self.placement.screen;
-        let x = if p.x - 288. >= screen.x {
-            p.x - 288.
+        let k = self.card_scale();
+        let gap = 4.;
+        let width = 200. * k;
+        let height = 76. * k;
+        let x = if p.x - width - gap >= screen.x {
+            p.x - width - gap
         } else {
-            p.x + PET_SIZE + 8.
+            p.x + self.placement.size + gap
         };
         let origin = screen.clamp(
             Point {
                 x,
-                y: p.y + PET_SIZE - 116.,
+                y: p.y + self.placement.size - height,
             },
-            280.,
-            116.,
+            width,
+            height,
         );
         self.card.setFrameOrigin(NSPoint::new(origin.x, origin.y));
         self.card.orderFrontRegardless();
@@ -881,17 +928,15 @@ pub fn event(event: Event) {
                     }
                     Control::ShowPet => {
                         ui.readout_pinned = false;
-                        ui.visible_until =
-                            Some(std::time::Instant::now() + std::time::Duration::from_secs(5));
                         ui.set_tucked(false);
                     }
+                    Control::Resize { size } => error = ui.resize_widget(size).err(),
                     Control::Readout => {
                         ui.readout_pinned = true;
                         ui.set_tucked(false);
                         ui.show_readout();
                     }
                     Control::Tuck => {
-                        ui.visible_until = None;
                         if ui.placement.edge.is_none() {
                             ui.placement.edge = Some(crate::geometry::Edge::Right);
                             ui.placement.align();
@@ -914,7 +959,8 @@ pub fn event(event: Event) {
                 let status = serde_json::json!({"ok":error.is_none(),"error":error,"pid":std::process::id(),
                     "tucked":ui.view.ivars().tucked.get(),"readout":ui.card.isVisible(),"readout_pinned":ui.readout_pinned,
                     "edge_watch":ui.edge_watch.is_some(),"cursor":cursor(),"animation_running":ui.animation.is_some(),
-                    "sprite_viewbox": {"width":PET_SIZE,"height":PET_SIZE},
+                    "sprite_viewbox": {"width":ui.placement.size,"height":ui.placement.size},
+                    "card_frame":rustrect(ui.card.frame()),"auto_tuck":false,
                     "frame":rustrect(ui.pet.frame()),"activity":ui.sessions.activity(),
                     "sprites":ui.view.ivars().sprites.borrow().as_ref().map(|p|p.path.clone()),
                     "accent":ui.view.ivars().sprites.borrow().as_ref().map(|p|p.accent),

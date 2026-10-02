@@ -25,6 +25,7 @@ pub enum Control {
     Quit,
     Readout,
     ShowPet,
+    Resize { size: f64 },
     Tuck,
     Reveal,
     ResetPlacement,

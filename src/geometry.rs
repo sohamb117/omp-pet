@@ -29,6 +29,12 @@ pub struct Placement {
     pub origin: Point,
     pub edge: Option<Edge>,
     pub screen: Rect,
+    #[serde(default = "default_size")]
+    pub size: f64,
+}
+
+fn default_size() -> f64 {
+    PET_SIZE
 }
 
 impl Rect {
@@ -51,20 +57,24 @@ impl Placement {
             },
             edge: None,
             screen,
+            size: PET_SIZE,
         }
     }
     pub fn snap(&mut self, origin: Point, screen: Rect) {
         self.screen = screen;
-        self.origin = screen.clamp(origin, PET_SIZE, PET_SIZE);
+        self.origin = screen.clamp(origin, self.size, self.size);
         let origin = self.origin;
         let distances = [
             (Edge::Left, (origin.x - screen.x).abs()),
             (
                 Edge::Right,
-                (origin.x + PET_SIZE - screen.x - screen.w).abs(),
+                (origin.x + self.size - screen.x - screen.w).abs(),
             ),
             (Edge::Bottom, (origin.y - screen.y).abs()),
-            (Edge::Top, (origin.y + PET_SIZE - screen.y - screen.h).abs()),
+            (
+                Edge::Top,
+                (origin.y + self.size - screen.y - screen.h).abs(),
+            ),
         ];
         self.edge = distances
             .into_iter()
@@ -74,12 +84,12 @@ impl Placement {
         self.align();
     }
     pub fn align(&mut self) {
-        self.origin = self.screen.clamp(self.origin, PET_SIZE, PET_SIZE);
+        self.origin = self.screen.clamp(self.origin, self.size, self.size);
         match self.edge {
             Some(Edge::Left) => self.origin.x = self.screen.x,
-            Some(Edge::Right) => self.origin.x = self.screen.x + self.screen.w - PET_SIZE,
+            Some(Edge::Right) => self.origin.x = self.screen.x + self.screen.w - self.size,
             Some(Edge::Bottom) => self.origin.y = self.screen.y,
-            Some(Edge::Top) => self.origin.y = self.screen.y + self.screen.h - PET_SIZE,
+            Some(Edge::Top) => self.origin.y = self.screen.y + self.screen.h - self.size,
             None => {}
         }
     }
@@ -119,25 +129,46 @@ impl Placement {
                 r.h = 0.;
             }
         }
+        // Extend activation to physical corners when the pet is near a usable-frame corner.
+        let grace = self.size / 2. + SNAP_DISTANCE;
+        if matches!(self.edge, Some(Edge::Left | Edge::Right)) {
+            if self.origin.y <= self.screen.y + grace {
+                let end = r.y + r.h;
+                r.y = physical.y;
+                r.h = end - r.y;
+            }
+            if self.origin.y + self.size >= self.screen.y + self.screen.h - grace {
+                r.h = physical.y + physical.h - r.y;
+            }
+        } else if matches!(self.edge, Some(Edge::Top | Edge::Bottom)) {
+            if self.origin.x <= self.screen.x + grace {
+                let end = r.x + r.w;
+                r.x = physical.x;
+                r.w = end - r.x;
+            }
+            if self.origin.x + self.size >= self.screen.x + self.screen.w - grace {
+                r.w = physical.x + physical.w - r.x;
+            }
+        }
         r
     }
     pub fn frame(self, tucked: bool) -> Rect {
         let mut r = Rect {
             x: self.origin.x,
             y: self.origin.y,
-            w: PET_SIZE,
-            h: PET_SIZE,
+            w: self.size,
+            h: self.size,
         };
         if tucked {
             match self.edge {
                 Some(Edge::Left) => r.w = TAB_SIZE,
                 Some(Edge::Right) => {
-                    r.x += PET_SIZE - TAB_SIZE;
+                    r.x += self.size - TAB_SIZE;
                     r.w = TAB_SIZE;
                 }
                 Some(Edge::Bottom) => r.h = TAB_SIZE,
                 Some(Edge::Top) => {
-                    r.y += PET_SIZE - TAB_SIZE;
+                    r.y += self.size - TAB_SIZE;
                     r.h = TAB_SIZE;
                 }
                 None => {}
@@ -213,6 +244,60 @@ mod tests {
         }));
     }
     #[test]
+    fn corner_reveal_and_resized_tabs_cover_display_insets() {
+        let physical = Rect {
+            x: -1512.,
+            y: 0.,
+            w: 1512.,
+            h: 982.,
+        };
+        let usable = Rect {
+            x: -1432.,
+            y: 80.,
+            w: 1432.,
+            h: 869.,
+        };
+        for edge in [Edge::Left, Edge::Right, Edge::Bottom, Edge::Top] {
+            for size in [64., 112., 200.] {
+                let mut p = Placement::new(usable);
+                p.size = size;
+                p.edge = Some(edge);
+                p.origin = Point {
+                    x: usable.x + 40.,
+                    y: usable.y + 40.,
+                };
+                p.align();
+                let corner = match edge {
+                    Edge::Left | Edge::Bottom => Point {
+                        x: physical.x,
+                        y: physical.y,
+                    },
+                    Edge::Right => Point {
+                        x: physical.x + physical.w,
+                        y: physical.y,
+                    },
+                    Edge::Top => Point {
+                        x: physical.x,
+                        y: physical.y + physical.h,
+                    },
+                };
+                assert!(
+                    p.activation(physical).contains(corner),
+                    "{edge:?} size {size}"
+                );
+                let tab = p.tucked_frame(physical);
+                assert_eq!(
+                    if matches!(edge, Edge::Left | Edge::Right) {
+                        tab.h
+                    } else {
+                        tab.w
+                    },
+                    size
+                );
+            }
+        }
+    }
+    #[test]
     fn screen_changes_clamp_floating_and_docked_positions() {
         let screen = Rect {
             x: 0.,
@@ -227,6 +312,7 @@ mod tests {
             },
             edge: Some(Edge::Top),
             screen,
+            size: PET_SIZE,
         };
         p.align();
         assert_eq!(p.origin.x, 0.);
