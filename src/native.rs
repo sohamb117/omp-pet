@@ -37,6 +37,12 @@ define_class!(
                 draw_pet(self.ivars());
             }
         }
+        #[unsafe(method(mouseDown:))]
+        fn mouse_down(&self, _event: &NSEvent) { with_ui(|ui| ui.begin_drag()); }
+        #[unsafe(method(mouseDragged:))]
+        fn mouse_dragged(&self, _event: &NSEvent) { with_ui(|ui| ui.drag()); }
+        #[unsafe(method(mouseUp:))]
+        fn mouse_up(&self, _event: &NSEvent) { with_ui(|ui| ui.end_drag()); }
         #[unsafe(method(rightMouseDown:))]
         fn right_mouse_down(&self, event: &NSEvent) {
             // Do not retain the UI borrow while AppKit runs the menu's nested loop.
@@ -79,6 +85,14 @@ define_class!(
     }
 );
 
+fn cursor() -> Point { let p=NSEvent::mouseLocation(); Point { x:p.x,y:p.y } }
+fn cancel(timer:&mut Option<Retained<NSTimer>>) { if let Some(t)=timer.take() { t.invalidate(); } }
+fn screen_at(p:Point,mtm:MainThreadMarker) -> Rect {
+    let screens=NSScreen::screens(mtm);
+    screens.iter().find(|s| rustrect(s.frame()).contains(p))
+        .or_else(|| screens.iter().next()).map(|s| rustrect(s.visibleFrame()))
+        .unwrap_or(Rect { x:0.,y:0.,w:1280.,h:720. })
+}
 fn nsrect(r: Rect) -> NSRect { NSRect::new(NSPoint::new(r.x,r.y), NSSize::new(r.w,r.h)) }
 fn rect(x: f64, y: f64, w: f64, h: f64) -> NSRect { nsrect(Rect { x,y,w,h }) }
 fn rustrect(r: NSRect) -> Rect { Rect { x:r.origin.x, y:r.origin.y, w:r.size.width, h:r.size.height } }
@@ -149,6 +163,8 @@ struct AppUi {
     pet:Retained<PetPanel>, view:Retained<PetView>, card:Retained<PetPanel>, labels:Vec<Retained<NSTextField>>,
     menu:Retained<NSMenu>, _status:Retained<NSStatusItem>, sessions:Sessions,
     placement:Placement, animation:Option<Retained<NSTimer>>, readout_pinned:bool,
+    reveal_timer:Option<Retained<NSTimer>>, hide_timer:Option<Retained<NSTimer>>,
+    drag_offset:Option<Point>, monitors:Vec<Retained<AnyObject>>,
 }
 impl AppUi {
     fn new(mtm:MainThreadMarker,delegate:&Delegate,demo:bool,readout:bool) -> Self {
@@ -166,7 +182,7 @@ impl AppUi {
             label.setFont(Some(&NSFont::systemFontOfSize(size)));
             label.setTextColor(Some(&color(0.90,0.94,0.96,1.)));
             label.setMaximumNumberOfLines(if height > 20. { 2 } else { 1 });
-            unsafe { content.addSubview(&label) }; labels.push(label);
+            content.addSubview(&label); labels.push(label);
         }
         card.setContentView(Some(&content)); card.setHasShadow(true);
         let menu=NSMenu::new(mtm); menu.setAutoenablesItems(false);
@@ -180,7 +196,8 @@ impl AppUi {
         status.setMenu(Some(&menu));
         let mut sessions=Sessions::default();
         if demo { sessions.update(0,Snapshot::demo()); }
-        let mut ui=Self { pet,view,card,labels,menu,_status:status,sessions,placement,animation:None,readout_pinned:readout };
+        let mut ui=Self { pet,view,card,labels,menu,_status:status,sessions,placement,animation:None,readout_pinned:readout,
+            reveal_timer:None,hide_timer:None,drag_offset:None,monitors:Vec::new() };
         ui.refresh(); ui.pet.orderFrontRegardless();
         if readout { ui.show_readout(); }
         ui
@@ -215,6 +232,77 @@ impl AppUi {
             if let Some(timer)=self.animation.take() { timer.invalidate(); }
         }
     }
+    fn install_monitors(&mut self) {
+        let mask=NSEventMask::MouseMoved | NSEventMask::LeftMouseDragged;
+        let global=RcBlock::new(|_event:NonNull<NSEvent>| with_ui(|ui| ui.pointer_moved()));
+        if let Some(m)=NSEvent::addGlobalMonitorForEventsMatchingMask_handler(mask,&global) { self.monitors.push(m); }
+        let local=RcBlock::new(|event:NonNull<NSEvent>| { with_ui(|ui| ui.pointer_moved()); event.as_ptr() });
+        // SAFETY: returns the unchanged live NSEvent pointer.
+        if let Some(m)=unsafe { NSEvent::addLocalMonitorForEventsMatchingMask_handler(mask,&local) } { self.monitors.push(m); }
+    }
+    fn pointer_moved(&mut self) {
+        if self.drag_offset.is_some() { return; }
+        let p=cursor();
+        if self.view.ivars().tucked.get() {
+            if self.placement.frame(true).contains(p) && NSEvent::pressedMouseButtons()==0 {
+                if self.reveal_timer.is_none() {
+                    self.reveal_timer=Some(timer(0.20,false,|| with_ui(|ui| {
+                        ui.reveal_timer.take();
+                        if ui.placement.frame(true).contains(cursor()) {
+                            ui.set_tucked(false); ui.pointer_moved();
+                        }
+                    })));
+                }
+            } else { cancel(&mut self.reveal_timer); }
+            return;
+        }
+        let pet_hit=self.placement.frame(false).contains(p);
+        let card_hit=self.card.isVisible() && rustrect(self.card.frame()).contains(p);
+        // Empty space around the sprite lets clicks reach the application below it.
+        let local=Point { x:p.x-self.placement.origin.x,y:p.y-self.placement.origin.y };
+        let sprite_hit=Rect { x:26.,y:27.,w:62.,h:68. }.contains(local)
+            || Rect { x:77.,y:77.,w:32.,h:23. }.contains(local)
+            || Rect { x:29.,y:12.,w:54.,h:5. }.contains(local);
+        self.pet.setIgnoresMouseEvents(!sprite_hit);
+        if pet_hit || card_hit {
+            cancel(&mut self.hide_timer);
+            if pet_hit && !self.card.isVisible() { self.refresh(); self.show_readout(); }
+        } else {
+            if !self.readout_pinned { self.card.orderOut(None); }
+            if self.placement.edge.is_some() && self.hide_timer.is_none() && !self.readout_pinned {
+                self.hide_timer=Some(timer(0.8,false,|| with_ui(|ui| {
+                    ui.hide_timer.take();
+                    let p=cursor();
+                    if !ui.placement.frame(false).contains(p)
+                        && !(ui.card.isVisible() && rustrect(ui.card.frame()).contains(p)) { ui.set_tucked(true); }
+                })));
+            }
+        }
+    }
+    fn set_tucked(&mut self,tucked:bool) {
+        cancel(&mut self.reveal_timer); cancel(&mut self.hide_timer);
+        self.view.ivars().tucked.set(tucked);
+        self.pet.setIgnoresMouseEvents(false);
+        self.pet.setFrame_display(nsrect(self.placement.frame(tucked)),true);
+        self.card.orderOut(None); self.sync_animation(); self.view.setNeedsDisplay(true);
+    }
+    fn begin_drag(&mut self) {
+        self.set_tucked(false); self.card.orderOut(None);
+        let p=cursor(); self.drag_offset=Some(Point { x:p.x-self.placement.origin.x,y:p.y-self.placement.origin.y });
+    }
+    fn drag(&mut self) {
+        if let Some(offset)=self.drag_offset {
+            let p=cursor(); self.placement.origin=Point { x:p.x-offset.x,y:p.y-offset.y };
+            self.placement.edge=None;
+            self.pet.setFrameOrigin(NSPoint::new(self.placement.origin.x,self.placement.origin.y));
+        }
+    }
+    fn end_drag(&mut self) {
+        if self.drag_offset.take().is_some() {
+            self.placement.snap(self.placement.origin,screen_at(cursor(),self.pet.mtm()));
+            self.set_tucked(false); self.pointer_moved();
+        }
+    }
     fn show_readout(&self) {
         let p=self.placement.origin; let screen=self.placement.screen;
         let x=if p.x-328. >= screen.x { p.x-328. } else { p.x+PET_SIZE+8. };
@@ -234,6 +322,7 @@ define_class!(
         fn did_finish_launching(&self,_note:&NSNotification) {
             let ui=AppUi::new(self.mtm(),self,self.ivars().0,self.ivars().1);
             UI.with(|slot| *slot.borrow_mut()=Some(ui));
+            with_ui(|ui| ui.install_monitors());
         }
     }
     impl Delegate {
@@ -246,18 +335,17 @@ define_class!(
         fn next_session(&self,_sender:Option<&AnyObject>) { with_ui(|ui| { ui.sessions.cycle(); ui.refresh(); }); }
         #[unsafe(method(toggleTuck:))]
         fn toggle_tuck(&self,_sender:Option<&AnyObject>) { with_ui(|ui| {
-            let tucked=!ui.view.ivars().tucked.get(); ui.view.ivars().tucked.set(tucked);
+            let tucked=!ui.view.ivars().tucked.get();
             if ui.placement.edge.is_none() { ui.placement.edge=Some(crate::geometry::Edge::Right); ui.placement.align(); }
-            ui.pet.setFrame_display(nsrect(ui.placement.frame(tucked)),true);
-            ui.card.orderOut(None); ui.refresh();
+            ui.readout_pinned=false; ui.set_tucked(tucked);
         }); }
         #[unsafe(method(resetPlacement:))]
         fn reset_placement(&self,_sender:Option<&AnyObject>) { with_ui(|ui| {
             ui.placement=Placement::new(rustrect(NSScreen::mainScreen(self.mtm()).unwrap().visibleFrame()));
-            ui.view.ivars().tucked.set(false); ui.pet.setFrame_display(nsrect(ui.placement.frame(false)),true); ui.refresh();
+            ui.set_tucked(false); ui.refresh();
         }); }
         #[unsafe(method(quit:))]
-        fn quit(&self,_sender:Option<&AnyObject>) { unsafe { NSApplication::sharedApplication(self.mtm()).terminate(None) }; }
+        fn quit(&self,_sender:Option<&AnyObject>) { NSApplication::sharedApplication(self.mtm()).terminate(None); }
     }
 );
 
