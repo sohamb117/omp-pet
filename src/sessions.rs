@@ -80,6 +80,12 @@ impl Sessions {
         self.selected = Some(keys[(index + 1) % keys.len()].clone());
     }
 
+    pub fn needs_attention(&self) -> bool {
+        self.entries.values().any(|s| {
+            s.connected && !matches!(s.snapshot.activity, Activity::Idle | Activity::Disconnected)
+        })
+    }
+
     pub fn activity(&self) -> Activity {
         self.current().map_or(Activity::Idle, |s| {
             if s.connected {
@@ -94,6 +100,34 @@ impl Sessions {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn any_connected_task_keeps_the_pet_awake_even_when_an_idle_session_is_selected() {
+        let mut sessions = Sessions::default();
+        let mut idle = Snapshot::demo();
+        idle.session_id = "idle".into();
+        idle.activity = Activity::Idle;
+        sessions.update(1, idle);
+        sessions.selected = Some("idle".into());
+        assert!(!sessions.needs_attention());
+        for (seq, activity) in [
+            Activity::Working,
+            Activity::Waiting,
+            Activity::Compacting,
+            Activity::Error,
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let mut busy = Snapshot::demo();
+            busy.seq = seq as u64 + 1;
+            busy.activity = activity;
+            sessions.update(2, busy);
+            assert_eq!(sessions.activity(), Activity::Idle);
+            assert!(sessions.needs_attention());
+        }
+        sessions.disconnect(2);
+        assert!(!sessions.needs_attention());
+    }
     #[test]
     fn reconnect_accepts_reset_sequence_and_old_socket_cannot_clobber_it() {
         let mut sessions = Sessions::default();

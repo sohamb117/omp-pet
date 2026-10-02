@@ -39,6 +39,7 @@ struct PetIvars {
     tucked: Cell<bool>,
     hovered: Cell<bool>,
     celebrate: Cell<bool>,
+    sleeping: Cell<bool>,
     sprites: RefCell<Option<SpritePack>>,
 }
 
@@ -197,6 +198,7 @@ fn draw_pet(ivars: &PetIvars) {
             ivars.activity.get(),
             ivars.phase.get(),
             ivars.celebrate.get(),
+            ivars.sleeping.get(),
             rect(0., 0., PET_SIZE, PET_SIZE),
         );
     } else {
@@ -213,8 +215,13 @@ fn draw_pet(ivars: &PetIvars) {
         rounded(rect(30., 31., 54., 50.), 20., &mint);
         oval(rect(30., 74., 15., 17.), &mint);
         oval(rect(69., 74., 15., 17.), &mint);
-        oval(rect(41., 54., 6., 9.), &ink);
-        oval(rect(67., 54., 6., 9.), &ink);
+        if ivars.sleeping.get() {
+            rounded(rect(40., 55., 8., 2.), 1., &ink);
+            rounded(rect(66., 55., 8., 2.), 1., &ink);
+        } else {
+            oval(rect(41., 54., 6., 9.), &ink);
+            oval(rect(67., 54., 6., 9.), &ink);
+        }
         rounded(rect(52., 46., 10., 3.), 1.5, &ink);
         oval(rect(34., 47., 9., 5.), &color(0.96, 0.62, 0.64, 0.75));
         oval(rect(73., 47., 9., 5.), &color(0.96, 0.62, 0.64, 0.75));
@@ -236,7 +243,7 @@ fn draw_pet(ivars: &PetIvars) {
         rounded(rect(29., 4., 54. * c.percent / 100., 4.), 2., &fill);
     }
     let activity = ivars.activity.get();
-    if activity != Activity::Idle {
+    if activity != Activity::Idle && !ivars.sleeping.get() {
         rounded(rect(77., 80., 32., 20.), 7., &ink);
         rounded(rect(80., 77., 7., 7.), 2., &ink);
         let tint = match activity {
@@ -306,6 +313,8 @@ struct AppUi {
     sessions: Sessions,
     placement: Placement,
     animation: Option<Retained<NSTimer>>,
+    sleep_timer: Option<Retained<NSTimer>>,
+    idle_sleep: crate::sleep::IdleSleep,
     readout_pinned: bool,
     menu_open: bool,
     reveal_timer: Option<Retained<NSTimer>>,
@@ -405,6 +414,8 @@ impl AppUi {
             sessions,
             placement,
             animation: None,
+            sleep_timer: None,
+            idle_sleep: crate::sleep::IdleSleep::default(),
             readout_pinned: readout,
             menu_open: false,
             reveal_timer: None,
@@ -425,6 +436,27 @@ impl AppUi {
         ui
     }
     fn refresh(&mut self) {
+        let remaining = self
+            .idle_sleep
+            .remaining(self.sessions.needs_attention(), std::time::Instant::now());
+        let sleeping = remaining == Some(std::time::Duration::ZERO);
+        match remaining {
+            None | Some(std::time::Duration::ZERO) => cancel(&mut self.sleep_timer),
+            Some(delay) if self.sleep_timer.is_none() => {
+                self.sleep_timer = Some(timer(delay.as_secs_f64(), false, || {
+                    with_ui(|ui| {
+                        ui.sleep_timer.take();
+                        ui.refresh();
+                    });
+                }));
+            }
+            Some(_) => {}
+        }
+        if self.view.ivars().sleeping.replace(sleeping) != sleeping {
+            cancel(&mut self.animation);
+            self.view.ivars().phase.set(0);
+            self.view.ivars().celebrate.set(false);
+        }
         let activity = self.sessions.activity();
         let previous = self.view.ivars().activity.replace(activity);
         if previous != activity {
@@ -503,6 +535,7 @@ impl AppUi {
         self.sync_animation();
     }
     fn sync_animation(&mut self) {
+        let sleeping = self.view.ivars().sleeping.get();
         let activity = self.sessions.activity();
         let custom = self
             .view
@@ -510,8 +543,9 @@ impl AppUi {
             .sprites
             .borrow()
             .as_ref()
-            .is_some_and(|pack| pack.animated(activity));
-        let active = (activity.animates() || custom || self.view.ivars().celebrate.get())
+            .is_some_and(|pack| pack.animated(activity, sleeping));
+        let active = (custom
+            || (!sleeping && (activity.animates() || self.view.ivars().celebrate.get())))
             && !self.view.ivars().tucked.get();
         if active && self.animation.is_none() {
             let index = self.view.ivars().phase.get();
@@ -522,7 +556,9 @@ impl AppUi {
                 .borrow()
                 .as_ref()
                 .map_or(0.33, |pack| {
-                    pack.duration(activity, index, self.view.ivars().celebrate.get()) as f64 / 1000.
+                    pack.duration(activity, index, self.view.ivars().celebrate.get(), sleeping)
+                        as f64
+                        / 1000.
                 });
             self.animation = Some(timer(interval, false, || {
                 with_ui(|ui| {
@@ -989,7 +1025,8 @@ pub fn event(event: Event) {
                     Control::Status => {}
                 }
                 let status = serde_json::json!({"ok":error.is_none(),"error":error,"pid":std::process::id(),
-                    "process_usage":crate::metrics::process_usage(),
+                    "process_usage":crate::metrics::process_usage(),"sleeping":ui.view.ivars().sleeping.get(),
+                    "sleep_timer_pending":ui.sleep_timer.is_some(),
                     "tucked":ui.view.ivars().tucked.get(),"hover_revealed":ui.hover_reveal.active(),"grip_visible":ui.view.ivars().hovered.get(),"readout":ui.card.isVisible(),"readout_pinned":ui.readout_pinned,
                     "edge_watch":ui.edge_watch.is_some(),"cursor":cursor(),"animation_running":ui.animation.is_some(),
                     "sprite_viewbox": {"width":ui.placement.size,"height":ui.placement.size},

@@ -46,6 +46,8 @@ pub struct Manifest {
     #[serde(default)]
     pub celebrate: Vec<FrameSpec>,
     #[serde(default)]
+    pub sleep: Vec<FrameSpec>,
+    #[serde(default)]
     pub working: Vec<FrameSpec>,
     #[serde(default)]
     pub waiting: Vec<FrameSpec>,
@@ -78,6 +80,7 @@ impl Manifest {
             &self.error,
             &self.disconnected,
             &self.celebrate,
+            &self.sleep,
         ];
         if all.iter().map(|v| v.len()).sum::<usize>() > 128 {
             return Err("At most 128 frames per pack".into());
@@ -177,6 +180,7 @@ impl SpritePack {
             ("error", manifest.error),
             ("disconnected", manifest.disconnected),
             ("celebrate", manifest.celebrate),
+            ("sleep", manifest.sleep),
         ] {
             let mut frames = Vec::new();
             for spec in specs {
@@ -296,7 +300,14 @@ impl SpritePack {
             pixel_art: manifest.pixel_art,
         })
     }
-    fn frames(&self, activity: Activity) -> &[Frame] {
+    fn frames(&self, activity: Activity, sleeping: bool) -> &[Frame] {
+        if sleeping {
+            return if self.states["sleep"].is_empty() {
+                &self.states["idle"][..1]
+            } else {
+                &self.states["sleep"]
+            };
+        }
         let key = match activity {
             Activity::Idle => "idle",
             Activity::Working => "working",
@@ -312,28 +323,53 @@ impl SpritePack {
             frames
         }
     }
-    pub fn animated(&self, activity: Activity) -> bool {
-        self.frames(activity).len() > 1
+    pub fn animated(&self, activity: Activity, sleeping: bool) -> bool {
+        self.frames(activity, sleeping).len() > 1 && (!sleeping || self.states["idle"].len() > 1)
     }
     pub fn has_celebration(&self) -> bool {
         !self.states["celebrate"].is_empty()
     }
-    pub fn duration(&self, activity: Activity, index: usize, celebrate: bool) -> u64 {
-        let frames = if celebrate && self.has_celebration() {
+    pub fn duration(
+        &self,
+        activity: Activity,
+        index: usize,
+        celebrate: bool,
+        sleeping: bool,
+    ) -> u64 {
+        let frames = if !sleeping && celebrate && self.has_celebration() {
             &self.states["celebrate"]
         } else {
-            self.frames(activity)
+            self.frames(activity, sleeping)
         };
-        frames[index % frames.len()].duration_ms
+        let duration = frames[index % frames.len()].duration_ms;
+        if sleeping {
+            // Never introduce a faster timer than the pack's slowest idle frame.
+            duration.max(crate::sleep::MIN_SLEEP_FRAME_MS).max(
+                self.states["idle"]
+                    .iter()
+                    .map(|f| f.duration_ms)
+                    .max()
+                    .unwrap_or(1000),
+            )
+        } else {
+            duration
+        }
     }
     pub fn celebration_frames(&self) -> usize {
         self.states["celebrate"].len()
     }
-    pub fn draw(&self, activity: Activity, index: usize, celebrate: bool, bounds: NSRect) {
-        let frames = if celebrate && self.has_celebration() {
+    pub fn draw(
+        &self,
+        activity: Activity,
+        index: usize,
+        celebrate: bool,
+        sleeping: bool,
+        bounds: NSRect,
+    ) {
+        let frames = if !sleeping && celebrate && self.has_celebration() {
             &self.states["celebrate"]
         } else {
-            self.frames(activity)
+            self.frames(activity, sleeping)
         };
         let frame = &frames[index % frames.len()];
         let scale = (bounds.size.width / frame.source.size.width)

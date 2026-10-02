@@ -7,6 +7,7 @@ mod native;
 mod palette;
 mod preferences;
 mod sessions;
+mod sleep;
 mod sprites;
 
 fn main() {
