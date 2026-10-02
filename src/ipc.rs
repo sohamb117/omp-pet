@@ -5,7 +5,13 @@ use crate::model::Snapshot;
 
 pub const MAX_FRAME: usize = 8192;
 #[derive(Debug)]
-pub enum Event { Snapshot(u64, Snapshot), Disconnected(u64) }
+pub enum Event { Snapshot(u64, Snapshot), Disconnected(u64), Control(Control) }
+#[derive(Debug, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Control { Quit, Readout, Tuck, Reveal, ResetPlacement, NextSession, ReloadSprites }
+#[derive(Debug, serde::Deserialize)]
+#[serde(untagged)]
+pub enum Message { Snapshot(Snapshot), Control { control: Control } }
 
 pub fn socket_path() -> PathBuf {
     std::env::var_os("OMP_PET_SOCKET").map(PathBuf::from).unwrap_or_else(|| {
@@ -53,8 +59,9 @@ impl Server {
                 thread::spawn(move || {
                     let mut reader = BufReader::new(stream);
                     loop {
-                        match read_snapshot(&mut reader) {
-                            Ok(Some(snapshot)) => deliver(Event::Snapshot(id, snapshot)),
+                        match read_message(&mut reader) {
+                            Ok(Some(Message::Snapshot(snapshot))) => deliver(Event::Snapshot(id, snapshot)),
+                            Ok(Some(Message::Control { control })) => deliver(Event::Control(control)),
                             Ok(None) | Err(_) => break,
                         }
                     }
@@ -68,7 +75,7 @@ impl Drop for Server {
     fn drop(&mut self) { let _ = fs::remove_file(&self.path); }
 }
 
-pub fn read_snapshot(reader: &mut impl BufRead) -> io::Result<Option<Snapshot>> {
+pub fn read_message(reader: &mut impl BufRead) -> io::Result<Option<Message>> {
     // fill_buf consumes only one bounded frame; read_line would allocate without limit.
     let mut bytes = Vec::new();
     loop {
@@ -83,9 +90,9 @@ pub fn read_snapshot(reader: &mut impl BufRead) -> io::Result<Option<Snapshot>> 
         reader.consume(count);
         if newline.is_some() { break; }
     }
-    let snapshot: Snapshot = serde_json::from_slice(&bytes).map_err(io::Error::other)?;
-    snapshot.validate().map_err(io::Error::other)?;
-    Ok(Some(snapshot))
+    let message: Message = serde_json::from_slice(&bytes).map_err(io::Error::other)?;
+    if let Message::Snapshot(snapshot)=&message { snapshot.validate().map_err(io::Error::other)?; }
+    Ok(Some(message))
 }
 
 #[cfg(test)]
@@ -96,15 +103,15 @@ mod tests {
         let frame = serde_json::to_string(&Snapshot::demo()).unwrap();
         let data = format!("{frame}\n{frame}\n");
         let mut reader = io::Cursor::new(data);
-        assert!(read_snapshot(&mut reader).unwrap().is_some());
-        assert!(read_snapshot(&mut reader).unwrap().is_some());
-        assert!(read_snapshot(&mut reader).unwrap().is_none());
-        assert!(read_snapshot(&mut io::Cursor::new(frame)).is_err());
+        assert!(read_message(&mut reader).unwrap().is_some());
+        assert!(read_message(&mut reader).unwrap().is_some());
+        assert!(read_message(&mut reader).unwrap().is_none());
+        assert!(read_message(&mut io::Cursor::new(frame)).is_err());
     }
     #[test]
     fn bounds_unterminated_frames_and_rejects_unknown_protocol() {
-        assert!(read_snapshot(&mut io::Cursor::new(vec![b'x'; MAX_FRAME + 1])).is_err());
+        assert!(read_message(&mut io::Cursor::new(vec![b'x'; MAX_FRAME + 1])).is_err());
         let mut s = Snapshot::demo(); s.version = 2;
-        assert!(read_snapshot(&mut io::Cursor::new(format!("{}\n", serde_json::to_string(&s).unwrap()))).is_err());
+        assert!(read_message(&mut io::Cursor::new(format!("{}\n", serde_json::to_string(&s).unwrap()))).is_err());
     }
 }

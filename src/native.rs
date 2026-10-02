@@ -7,7 +7,7 @@ use objc2::runtime::{AnyObject, ProtocolObject};
 use objc2_app_kit::*;
 use objc2_foundation::{MainThreadMarker, NSNotification, NSObject, NSObjectProtocol,
     NSPoint, NSRect, NSSize, NSString, NSTimer};
-use crate::{geometry::{Placement, Point, Rect, PET_SIZE}, ipc::Event,
+use crate::{geometry::{Placement, Point, Rect, PET_SIZE}, ipc::{Event,Control},
     model::{Activity, ContextUsage, Snapshot}, sessions::Sessions};
 
 thread_local! { static UI: RefCell<Option<AppUi>> = const { RefCell::new(None) }; }
@@ -364,6 +364,20 @@ pub fn event(event:Event) {
         match event {
             Event::Snapshot(connection,snapshot) => { ui.sessions.update(connection,snapshot); }
             Event::Disconnected(connection) => ui.sessions.disconnect(connection),
+            Event::Control(control) => match control {
+                Control::Quit => NSApplication::sharedApplication(ui.pet.mtm()).terminate(None),
+                Control::Readout => { ui.readout_pinned=true; ui.set_tucked(false); ui.show_readout(); }
+                Control::Tuck => {
+                    if ui.placement.edge.is_none() { ui.placement.edge=Some(crate::geometry::Edge::Right); ui.placement.align(); }
+                    ui.readout_pinned=false; ui.set_tucked(true);
+                }
+                Control::Reveal => ui.set_tucked(false),
+                Control::ResetPlacement => {
+                    ui.placement=Placement::new(screen_at(cursor(),ui.pet.mtm())); ui.set_tucked(false);
+                }
+                Control::NextSession => ui.sessions.cycle(),
+                Control::ReloadSprites => {},
+            },
         }
         ui.refresh();
     });
