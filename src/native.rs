@@ -425,7 +425,7 @@ impl AppUi {
                     .clone()
                     .unwrap_or_else(|| session.snapshot.task.clone()),
                 Activity::Waiting => "Awaiting approval".into(),
-                Activity::Compacting => "Compacting context".into(),
+                Activity::Compacting => activity.label().into(),
                 Activity::Error => "Error".into(),
                 Activity::Disconnected => "Disconnected".into(),
                 Activity::Idle => "Ready".into(),
@@ -845,6 +845,10 @@ fn choose_sprites(mtm: MainThreadMarker) {
 }
 
 pub fn event(event: Event) {
+    if matches!(event, Event::Terminate) {
+        NSApplication::sharedApplication(MainThreadMarker::new().unwrap()).terminate(None);
+        return;
+    }
     if let Event::Control(Control::ChooseSprites, reply) = event {
         let _ = reply.send("{\"ok\":true,\"picker\":true}".into());
         choose_sprites(MainThreadMarker::new().unwrap());
@@ -853,11 +857,11 @@ pub fn event(event: Event) {
     // terminate synchronously invokes applicationWillTerminate; release UI borrows first.
     if let Event::Control(Control::Quit, reply) = event {
         let _ = reply.send("{\"ok\":true}".into());
-        NSApplication::sharedApplication(MainThreadMarker::new().unwrap()).terminate(None);
         return;
     }
     with_ui(|ui| {
         match event {
+            Event::Terminate => unreachable!("handled before borrowing UI"),
             Event::Snapshot(connection, snapshot) => {
                 ui.sessions.update(connection, snapshot);
             }

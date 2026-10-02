@@ -16,6 +16,7 @@ pub const MAX_FRAME: usize = 8192;
 pub enum Event {
     Snapshot(u64, Snapshot),
     Disconnected(u64),
+    Terminate,
     Control(Control, std::sync::mpsc::SyncSender<String>),
 }
 #[derive(Debug, serde::Deserialize)]
@@ -118,6 +119,7 @@ impl Server {
                                 deliver(Event::Snapshot(id, snapshot))
                             }
                             Ok(Some(Message::Control { control })) => {
+                                let quitting = matches!(control, Control::Quit);
                                 let (send, receive) = std::sync::mpsc::sync_channel(1);
                                 deliver(Event::Control(control, send));
                                 if let Ok(response) =
@@ -128,6 +130,10 @@ impl Server {
                                     let _ = stream
                                         .set_write_timeout(Some(std::time::Duration::from_secs(1)));
                                     let _ = stream.write_all(format!("{response}\n").as_bytes());
+                                }
+                                if quitting {
+                                    deliver(Event::Terminate);
+                                    break;
                                 }
                             }
                             Ok(None) | Err(_) => break,
