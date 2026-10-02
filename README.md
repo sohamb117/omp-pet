@@ -42,9 +42,11 @@ Use the menu-bar **π** or right-click the pet for readout, session switching, a
 /pet status                  # show native status
 ```
 
+After five continuous minutes without a connected session working or needing attention, the pet sleeps. Idle heartbeats do not reset the countdown; working, compacting, approval requests, and errors in any connected session keep it awake. Work wakes it immediately. The countdown uses one one-shot timer, not polling. Sleep frames are capped at one per second and never faster than the pack's slowest idle frame; packs with static idle images use a still sleep pose. The native cat closes its eyes without an animation timer, and tucked pets never animate. `/pet status` includes `sleeping` and `sleep_timer_pending` for inspection.
+
 ## Custom sprites
 
-Choose a folder containing `manifest.json` and PNGs with `/pet sprites`. Version 1 requires a nonempty `idle` animation. Optional animations: `working`, `waiting`, `compacting`, `error`, `disconnected`, and `celebrate` (plays once after successful work). Missing states fall back to idle. Static sprites work as a single-frame animation.
+Choose a folder containing `manifest.json` and PNGs with `/pet sprites`. Version 1 requires a nonempty `idle` animation. Optional animations: `working`, `waiting`, `compacting`, `error`, `disconnected`, `sleep`, and `celebrate` (plays once after successful work). Missing states fall back to idle; missing sleep frames use a still idle pose. Static sprites work as a single-frame animation.
 
 ```json
 {
@@ -52,6 +54,7 @@ Choose a folder containing `manifest.json` and PNGs with `/pet sprites`. Version
   "frame_ms": 200,
   "pixel_art": true,
   "idle": ["idle-1.png", "idle-2.png"],
+  "sleep": ["sleep-1.png", "sleep-2.png"],
   "working": [
     {"file": "walk.png", "x": 0, "y": 0, "width": 32, "height": 40, "duration_ms": 100},
     {"file": "walk.png", "x": 32, "y": 0, "width": 32, "height": 40, "duration_ms": 100}
