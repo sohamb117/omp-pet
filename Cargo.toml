@@ -1,0 +1,19 @@
+[package]
+name = "omp-pet"
+version = "0.1.0"
+edition = "2024"
+description = "A small native macOS desktop companion for oh-my-pi"
+license = "MIT"
+rust-version = "1.85"
+
+[dependencies]
+objc2 = "0.6"
+objc2-app-kit = "0.3"
+objc2-foundation = "0.3"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[profile.release]
+lto = "thin"
+strip = true
+codegen-units = 1

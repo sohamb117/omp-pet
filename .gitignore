@@ -1,0 +1,6 @@
+/target/
+/work/
+.DS_Store
+*.sock
+/node_modules/
+/dist/
