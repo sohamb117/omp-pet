@@ -56,6 +56,7 @@ impl Placement {
     pub fn snap(&mut self, origin: Point, screen: Rect) {
         self.screen = screen;
         self.origin = screen.clamp(origin, PET_SIZE, PET_SIZE);
+        let origin = self.origin;
         let distances = [
             (Edge::Left, (origin.x - screen.x).abs()),
             (
@@ -165,6 +166,25 @@ mod tests {
         assert_eq!(tab.h, PET_SIZE);
         assert!(tab.contains(Point { x: -1., y: 500. }));
         assert!(!tab.contains(Point { x: -1., y: 700. }));
+    }
+    #[test]
+    fn dragging_the_sprite_center_into_an_edge_docks_even_if_frame_overhangs() {
+        let screen = Rect {
+            x: 0.,
+            y: 80.,
+            w: 1512.,
+            h: 869.,
+        };
+        for (origin, edge) in [
+            (Point { x: 1456., y: 300. }, Edge::Right),
+            (Point { x: -56., y: 300. }, Edge::Left),
+            (Point { x: 500., y: 24. }, Edge::Bottom),
+            (Point { x: 500., y: 893. }, Edge::Top),
+        ] {
+            let mut p = Placement::new(screen);
+            p.snap(origin, screen);
+            assert_eq!(p.edge, Some(edge));
+        }
     }
     #[test]
     fn activation_reaches_physical_edge_across_dock_inset() {
