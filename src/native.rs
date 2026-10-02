@@ -18,7 +18,7 @@ define_class!(
     #[unsafe(super = NSView)]
     #[thread_kind = MainThreadOnly]
     #[ivars = PetIvars]
-    pub struct PetView;
+    struct PetView;
     unsafe impl NSObjectProtocol for PetView {}
     impl PetView {
         #[unsafe(method(drawRect:))]
@@ -39,7 +39,7 @@ define_class!(
     // SAFETY: NSPanel subclass; prevents even clicks from stealing keyboard focus.
     #[unsafe(super = NSPanel)]
     #[thread_kind = MainThreadOnly]
-    pub struct PetPanel;
+    struct PetPanel;
     unsafe impl NSObjectProtocol for PetPanel {}
     impl PetPanel {
         #[unsafe(method(canBecomeKeyWindow))]
@@ -83,7 +83,7 @@ fn draw_pet(_phase: u8) {
     oval(rect(73., 43., 9., 5.), &color(0.96, 0.62, 0.64, 0.75));
 }
 
-pub fn panel(mtm: MainThreadMarker, bounds: NSRect) -> Retained<PetPanel> {
+fn panel(mtm: MainThreadMarker, bounds: NSRect) -> Retained<PetPanel> {
     let panel: Retained<PetPanel> = unsafe {
         msg_send![PetPanel::alloc(mtm), initWithContentRect: bounds,
             styleMask: NSWindowStyleMask::Borderless | NSWindowStyleMask::NonactivatingPanel,
