@@ -75,10 +75,19 @@ define_class!(
         #[unsafe(method(mouseUp:))]
         fn mouse_up(&self, _event: &NSEvent) { with_ui(|ui| ui.end_drag()); }
         #[unsafe(method(rightMouseDown:))]
-        fn right_mouse_down(&self, event: &NSEvent) {
-            // Do not retain the UI borrow while AppKit runs the menu's nested loop.
-            let menu = UI.with(|slot| slot.borrow().as_ref().map(|ui| ui.menu.clone()));
-            if let Some(menu) = menu { NSMenu::popUpContextMenu_withEvent_forView(&menu, event, self); }
+        fn right_mouse_down(&self, _event: &NSEvent) {
+            // Anchor in screen coordinates so the tiny/resized pet view cannot constrain the menu.
+            let menu = UI.with(|slot| slot.borrow_mut().as_mut().map(|ui| {
+                ui.menu_open = true;
+                ui.card.orderOut(None);
+                ui.menu.clone()
+            }));
+            if let Some(menu) = menu {
+                let p = cursor();
+                // No UI borrow across AppKit's nested tracking loop.
+                menu.popUpMenuPositioningItem_atLocation_inView(None, NSPoint::new(p.x, p.y), None);
+                with_ui(|ui| { ui.menu_open = false; ui.pointer_moved(); });
+            }
         }
     }
 );
@@ -298,6 +307,7 @@ struct AppUi {
     placement: Placement,
     animation: Option<Retained<NSTimer>>,
     readout_pinned: bool,
+    menu_open: bool,
     reveal_timer: Option<Retained<NSTimer>>,
     drag_offset: Option<Point>,
     resize_start: Option<(Point, Placement)>,
@@ -358,6 +368,8 @@ impl AppUi {
         card.setHasShadow(true);
         let menu = NSMenu::new(mtm);
         menu.setAutoenablesItems(false);
+        menu.setMinimumWidth(160.);
+        unsafe { menu.setFont(Some(&NSFont::systemFontOfSize(13.))) };
         for (title, action) in [
             ("Pin readout", sel!(toggleReadout:)),
             ("Next session", sel!(nextSession:)),
@@ -394,6 +406,7 @@ impl AppUi {
             placement,
             animation: None,
             readout_pinned: readout,
+            menu_open: false,
             reveal_timer: None,
             drag_offset: None,
             resize_start: None,
@@ -627,7 +640,7 @@ impl AppUi {
                 .contains(p)
     }
     fn pointer_moved(&mut self) {
-        if self.drag_offset.is_some() || self.resize_start.is_some() {
+        if self.menu_open || self.drag_offset.is_some() || self.resize_start.is_some() {
             return;
         }
         let p = cursor();

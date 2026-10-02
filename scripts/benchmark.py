@@ -64,12 +64,16 @@ def main():
                 start = time.monotonic()
                 samples = []
                 latencies = []
+                valid = True
                 while time.monotonic() - start < args.seconds:
-                    time.sleep(min(1, args.seconds - (time.monotonic() - start)))
+                    time.sleep(max(0, min(1, args.seconds - (time.monotonic() - start))))
                     if activity == 'working':
                         snapshot(activity)
                     sent = time.monotonic()
                     last = control('status')
+                    valid &= last['tucked'] == (visibility == 'tuck') and last['activity'] == activity
+                    valid &= last['sprite_viewbox'] == before['sprite_viewbox']
+                    valid &= last['readout'] == (visibility == 'readout')
                     latencies.append((time.monotonic() - sent) * 1000)
                     samples.append(last['process_usage']['resident_bytes'] / 1024**2)
                 elapsed = time.monotonic() - start
@@ -77,7 +81,7 @@ def main():
                 result = dict(scenario=name, seconds=round(elapsed, 2), cpu_percent_one_core=round(cpu, 3),
                     rss_mib_mean=round(statistics.mean(samples), 2), rss_mib_peak=round(max(samples), 2),
                     ipc_ms_median=round(statistics.median(latencies), 2),
-                    expected_state_observed=last['tucked'] == (visibility == 'tuck') and last['activity'] == activity,
+                    expected_state_observed=valid,
                     animation_running=last['animation_running'], edge_watch=last['edge_watch'])
                 report['scenarios'].append(result)
                 print(json.dumps(result), flush=True)
