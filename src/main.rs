@@ -1,4 +1,5 @@
 mod geometry;
+mod ipc;
 mod model;
 mod sessions;
 mod native;

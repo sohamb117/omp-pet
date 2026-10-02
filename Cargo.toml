@@ -7,6 +7,9 @@ license = "MIT"
 rust-version = "1.85"
 
 [dependencies]
+block2 = "0.6"
+dispatch2 = "0.3"
+libc = "0.2"
 objc2 = "0.6"
 objc2-app-kit = "0.3"
 objc2-foundation = "0.3"
