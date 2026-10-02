@@ -19,15 +19,25 @@ omp -e /Users/soham/Documents/code/omp-pet/extension/index.ts
 
 The TypeScript bridge uses only Node built-ins at runtime; the OMP import is a type import. Bun is needed only for development checks. The app must be running to show updates; the extension reconnects on later events or its five-second heartbeat when the app restarts.
 
-Hover for task, active tools, context occupancy, and session state. Animated dots mean the agent lifecycle is active; they do not prove token generation or tool progress. The 2-point context bar uses the sprite pack's most common chromatic color, ignoring transparency and near-gray pixels. Context remains unknown when OMP cannot supply it.
+Hover for task, active tools, context occupancy, and session state. Animated dots mean the agent lifecycle is active; they do not prove token generation or tool progress. The 4-point context bar uses the sprite pack's most common chromatic color, ignoring transparency and near-gray pixels. Context remains unknown when OMP cannot supply it.
 
-Drag the pet near any screen edge to dock it. Leaving it hides it as a 3-point line; hold the cursor at that screen segment for 200 ms to reveal it. Reveal detection includes Dock and menu-bar insets. Placement and sprite choice persist across restarts. The pet and task card are nonactivating fixed-size panels with native tiling exclusion.
+Drag the pet near any screen edge to dock it. Leaving it hides it as a 3-point line; hold the cursor at that screen segment for 200 ms to reveal it. The line sits on the physical display edge; reveal detection includes Dock and menu-bar insets. A lightweight docked cursor watcher backs up native mouse events, and floating pets do not run it. Placement and sprite choice persist across restarts. The pet and task card are nonactivating fixed-size panels with native tiling exclusion.
 
-Use the menu-bar **π** or right-click the pet to pin the task readout, switch sessions, choose/reload sprites, restore bundled Zorua, reset placement, or quit.
+Use the menu-bar **π** or right-click the pet for readout, session switching, and tuck/reveal. Configuration and lifecycle controls are OMP slash commands:
+
+```text
+/pet sprites                 # native folder picker
+/pet sprites /path/to/pack   # select a pack directly
+/pet reload                  # reload edited sprites
+/pet cat                     # restore the default cat
+/pet reset                   # reset desktop placement
+/pet quit                    # quit the companion
+/pet status                  # show native status
+```
 
 ## Custom sprites
 
-Choose a folder containing `manifest.json` and PNGs using **Choose sprite pack…**. Version 1 requires a nonempty `idle` animation. Optional animations: `working`, `waiting`, `compacting`, `error`, `disconnected`, and `celebrate` (plays once after successful work). Missing states fall back to idle. Static sprites work as a single-frame animation.
+Choose a folder containing `manifest.json` and PNGs with `/pet sprites`. Version 1 requires a nonempty `idle` animation. Optional animations: `working`, `waiting`, `compacting`, `error`, `disconnected`, and `celebrate` (plays once after successful work). Missing states fall back to idle. Static sprites work as a single-frame animation.
 
 ```json
 {
@@ -42,9 +52,9 @@ Choose a folder containing `manifest.json` and PNGs using **Choose sprite pack�
 }
 ```
 
-Crop coordinates start at the PNG's top-left corner. Durations must be 80–2000 ms. Paths stay within the pack; limits are 128 frames, 16 MiB encoded PNGs, and four million decoded pixels. Sprites scale to fit without changing the panel size. Animation timers stop while tucked. **Reload sprites** updates edited files and recalculates the accent.
+Crop coordinates start at the PNG's top-left corner. Durations must be 80–2000 ms. Paths stay within the pack; limits are 128 frames, 16 MiB encoded PNGs, and four million decoded pixels. Sprites use one scale factor for the whole pack. Transparent padding is excluded; per-animation positions preserve motion without resizing between frames or states. Animation timers stop while tucked. `/pet reload` updates edited files and recalculates the accent.
 
-The bundled [Zorua pack](assets/zorua/CREDITS.md) uses attributed PMDCollab artwork with idle, walk, look-up, charge, hurt, sleep, and hop animations. Sprite rights are separate from the app's code license.
+The default is the native cat. No Pokémon artwork is bundled or tracked in the current source tree. The downloaded Zorua pack remains locally under `work/sprite-packs/zorua`, with source attribution and upstream credits, and can be selected with `/pet sprites /Users/soham/Documents/code/omp-pet/work/sprite-packs/zorua`. Sprite rights are separate from the app's code license.
 
 ## Development
 
@@ -53,7 +63,7 @@ cargo test
 bun install --ignore-scripts
 bun test
 bun run typecheck
-python3 scripts/check-sprites.py
+python3 scripts/check-sprites.py /path/to/pack
 scripts/build-app.sh debug
 ```
 
