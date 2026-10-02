@@ -7,7 +7,7 @@ import { homedir } from "node:os";
 import { resolve } from "node:path";
 import { socketPath } from "./transport.ts";
 
-type Control = string | { load_sprites: { path: string } };
+type Control = string | { load_sprites: { path: string } } | { resize: { size: number } };
 export function requestControl(control: Control, path = socketPath()): Promise<Record<string, any>> {
   return new Promise((resolve, reject) => {
     const socket = createConnection({ path });
@@ -55,17 +55,21 @@ export async function showPet(
   }
   throw new Error("OMP Pet.app launched but its local socket did not become ready");
 }
-const HELP = "/pet sprites [folder] · reload · cat · reset · quit · show · tuck · status";
+const HELP = "/pet sprites [folder] · reload · cat · reset · quit · show · tuck · size 160 · status";
 export function registerPetCommand(pi: ExtensionAPI): void {
   pi.registerCommand("pet", {
     description: "Configure and control your native macOS desktop pet",
-    getArgumentCompletions: prefix => ["sprites", "reload", "cat", "reset", "quit", "show", "tuck", "status"]
+    getArgumentCompletions: prefix => ["sprites", "reload", "cat", "reset", "quit", "show", "tuck", "size", "status"]
       .filter(value => value.startsWith(prefix)).map(value => ({ value, label: value })),
     handler: async (args, ctx) => {
       const match = args.trim().match(/^(\S+)(?:\s+([\s\S]+))?$/);
       const command = match?.[1]?.toLowerCase();
       let control: Control;
-      if (command === "sprites") {
+      if (command === "size") {
+        const size=Number(match?.[2]);
+        if (!Number.isFinite(size) || size<64 || size>256) { ctx.ui.notify("Usage: /pet size 160 (64–256)","error"); return; }
+        control={resize:{size}};
+      } else if (command === "sprites") {
         let path = match?.[2]?.trim();
         if (path && ((path.startsWith('"') && path.endsWith('"')) || (path.startsWith("'") && path.endsWith("'")))) path = path.slice(1, -1);
         if (path?.startsWith("~/")) path = resolve(homedir(), path.slice(2));

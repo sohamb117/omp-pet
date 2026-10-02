@@ -26,8 +26,8 @@ test("slash commands choose sprites and control the companion via acknowledged I
     registerPetCommand({ registerCommand: (name: string, options: any) => { expect(name).toBe("pet"); handler = options.handler; } } as unknown as ExtensionAPI);
     const notices: [string, string][] = [];
     const ctx = { cwd: dir, ui: { notify: (message: string, type: string) => notices.push([message, type]) } } as unknown as ExtensionCommandContext;
-    for (const arg of ["sprites", 'sprites "my sprites"', "cat", "reset", "quit", "reload"]) await handler!(arg, ctx);
-    expect(received).toEqual(["choose_sprites", { load_sprites: { path: join(dir, "my sprites") } }, "use_cat", "reset_placement", "quit", "reload_sprites"]);
+    for (const arg of ["sprites", 'sprites "my sprites"', "cat", "reset", "quit", "size 160", "reload"]) await handler!(arg, ctx);
+    expect(received).toEqual(["choose_sprites", { load_sprites: { path: join(dir, "my sprites") } }, "use_cat", "reset_placement", "quit", {resize:{size:160}}, "reload_sprites"]);
     expect(notices.at(-1)).toEqual(["Invalid sprite pack", "error"]);
   } finally {
     if (old === undefined) delete process.env.OMP_PET_SOCKET; else process.env.OMP_PET_SOCKET = old;

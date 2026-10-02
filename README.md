@@ -24,9 +24,11 @@ The TypeScript bridge uses only Node built-ins at runtime; the OMP import is a t
 
 Hover for task, active tools, context occupancy, and session state. Animated dots mean the agent lifecycle is active; they do not prove token generation or tool progress. The 4-point context bar uses the sprite pack's most common chromatic color, ignoring transparency and near-gray pixels. Context remains unknown when OMP cannot supply it.
 
-Drag the pet near any screen edge to dock it. Leaving it hides it as a 3-point line; hold the cursor at that screen segment for 200 ms to reveal it. The line sits on the physical display edge; reveal detection includes Dock and menu-bar insets. A lightweight docked cursor watcher backs up native mouse events, and floating pets do not run it. Placement and sprite choice persist across restarts. The pet and task card are nonactivating fixed-size panels with native tiling exclusion.
+Drag the pet near any screen edge to dock it. Tucking happens only when selected with `/pet tuck` or the interaction menu. The tucked state is a 3-point line; hold the cursor at that screen segment (including nearby corners) for 200 ms to reveal it. The line sits on the physical display edge; reveal detection includes Dock and menu-bar insets. A lightweight cursor watcher runs only while tucked to catch missed edge mouse events. There is no automatic tucking. Placement and sprite choice persist across restarts. The pet and task card are nonactivating fixed-size panels with native tiling exclusion.
 
-Use the menu-bar **π** or right-click the pet for readout, session switching, and tuck/reveal. **Pin readout** keeps the hover card open while the pet is visible; its three fields are project, current step/status, and used tokens plus percent. The card uses the pet palette. Configuration and lifecycle controls are OMP slash commands:
+Use the menu-bar **π** or right-click the pet for readout, session switching, and tuck/reveal. Drag the bottom-right grip or Option-drag anywhere on the pet to resize it. Size is saved across restarts, and the readout scales with the widget. The readout has tight margins and an opaque palette-matched background.
+
+**Pin readout** keeps the hover card open while the pet is visible; its three fields are project, current step/status, and used tokens plus percent. The card uses the pet palette. Configuration and lifecycle controls are OMP slash commands:
 
 ```text
 /pet sprites                 # native folder picker
@@ -36,6 +38,7 @@ Use the menu-bar **π** or right-click the pet for readout, session switching, a
 /pet reset                   # reset desktop placement
 /pet quit                    # quit the companion
 /pet show                    # launch the app if needed and reveal the pet
+/pet size 160                # resize the complete widget (64–256)
 /pet status                  # show native status
 ```
 
@@ -56,7 +59,7 @@ Choose a folder containing `manifest.json` and PNGs with `/pet sprites`. Version
 }
 ```
 
-Crop coordinates start at the PNG's top-left corner. Durations must be 80–2000 ms. Paths stay within the pack; limits are 128 frames, 16 MiB encoded PNGs, and four million decoded pixels. Transparent padding is excluded and every frame fits the same full 112×112 pet viewport, preserving its proportions. Animation timers stop while tucked. `/pet reload` updates edited files and recalculates the accent.
+Crop coordinates start at the PNG's top-left corner. Durations must be 80–2000 ms. Paths stay within the pack; limits are 128 frames, 16 MiB encoded PNGs, and four million decoded pixels. Transparent padding is excluded and every frame fits the same full pet viewport (112×112 by default), preserving its proportions. Animation timers stop while tucked. `/pet reload` updates edited files and recalculates the accent.
 
 The default is the native cat. No Pokémon artwork is bundled or tracked in the current source tree. The downloaded Zorua pack remains locally under `work/sprite-packs/zorua`, with source attribution and upstream credits, and can be selected with `/pet sprites /Users/soham/Documents/code/omp-pet/work/sprite-packs/zorua`. Sprite rights are separate from the app's code license.
 
