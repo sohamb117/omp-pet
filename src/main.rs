@@ -1,3 +1,4 @@
+mod geometry;
 mod model;
 mod sessions;
 mod native;
