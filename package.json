@@ -1,0 +1,19 @@
+{
+  "name": "omp-pet",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Native macOS pet companion and oh-my-pi event bridge",
+  "type": "module",
+  "omp": {
+    "extensions": ["extension/index.ts"]
+  },
+  "scripts": {
+    "test": "bun test extension",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@oh-my-pi/pi-coding-agent": "18.4.10",
+    "@types/bun": "1.4.2",
+    "typescript": "5.9.3"
+  }
+}
