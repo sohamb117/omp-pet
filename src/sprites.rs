@@ -118,16 +118,44 @@ impl Manifest {
         Ok(())
     }
 }
+// Alpha data is top-down; AppKit source rectangles are bottom-up.
+fn opaque_bounds(w: usize, h: usize, alpha: &[u8], source: NSRect) -> Option<NSRect> {
+    let mut left = usize::MAX;
+    let mut bottom = usize::MAX;
+    let mut right = 0;
+    let mut top = 0;
+    let ox = source.origin.x as usize;
+    let oy = source.origin.y as usize;
+    for y in 0..source.size.height as usize {
+        for x in 0..source.size.width as usize {
+            if ox + x < w && oy + y < h && alpha[(h - 1 - oy - y) * w + ox + x] >= 16 {
+                left = left.min(x);
+                bottom = bottom.min(y);
+                right = right.max(x + 1);
+                top = top.max(y + 1);
+            }
+        }
+    }
+    (left != usize::MAX).then(|| {
+        NSRect::new(
+            NSPoint::new(left as f64, bottom as f64),
+            NSSize::new((right - left) as f64, (top - bottom) as f64),
+        )
+    })
+}
 struct Frame {
     image: Retained<NSImage>,
     source: NSRect,
     duration_ms: u64,
+    offset: NSPoint,
+    canvas: NSSize,
 }
 pub struct SpritePack {
     states: BTreeMap<&'static str, Vec<Frame>>,
     pub path: PathBuf,
     pub accent: [u8; 3],
     pixel_art: bool,
+    reference: NSSize,
 }
 impl SpritePack {
     pub fn load(path: &Path, _mtm: MainThreadMarker) -> Result<Self, String> {
@@ -139,6 +167,8 @@ impl SpritePack {
         let manifest: Manifest = serde_json::from_slice(&bytes).map_err(|e| e.to_string())?;
         manifest.validate()?;
         let mut images = BTreeMap::<PathBuf, Retained<NSImage>>::new();
+        let mut alpha_images = BTreeMap::<PathBuf, (usize, usize, Vec<u8>)>::new();
+        let mut reference = NSSize::new(1., 1.);
         let mut pixels = 0u64;
         let mut encoded = 0u64;
         let mut states = BTreeMap::new();
@@ -188,12 +218,18 @@ impl SpritePack {
                     let space = NSColorSpace::sRGBColorSpace();
                     for rep in image.representations() {
                         if let Some(bitmap) = rep.downcast_ref::<NSBitmapImageRep>() {
+                            let w = bitmap.pixelsWide() as usize;
+                            let h = bitmap.pixelsHigh() as usize;
+                            image.setSize(NSSize::new(w as f64, h as f64));
+                            let mut alpha = vec![0; w * h];
                             for y in 0..bitmap.pixelsHigh() {
                                 for x in 0..bitmap.pixelsWide() {
                                     if let Some(c) = bitmap
                                         .colorAtX_y(x, y)
                                         .and_then(|c| c.colorUsingColorSpace(&space))
                                     {
+                                        alpha[y as usize * w + x as usize] =
+                                            (c.alphaComponent() * 255.).round() as u8;
                                         palette.add(
                                             [
                                                 (c.redComponent() * 255.).round() as u8,
@@ -205,6 +241,8 @@ impl SpritePack {
                                     }
                                 }
                             }
+                            alpha_images.insert(file.clone(), (w, h, alpha));
+                            break;
                         }
                     }
                     images.insert(file.clone(), image);
@@ -236,11 +274,50 @@ impl SpritePack {
                         )
                     }
                 };
+                let (w, h, alpha) = alpha_images
+                    .get(&file)
+                    .ok_or("PNG has no bitmap representation")?;
+                let visible = opaque_bounds(*w, *h, alpha, source)
+                    .ok_or("Sprite frame is fully transparent")?;
                 frames.push(Frame {
                     image,
-                    source,
+                    source: NSRect::new(
+                        NSPoint::new(
+                            source.origin.x + visible.origin.x,
+                            source.origin.y + visible.origin.y,
+                        ),
+                        visible.size,
+                    ),
                     duration_ms,
+                    offset: visible.origin,
+                    canvas: NSSize::new(1., 1.),
                 });
+            }
+            if !frames.is_empty() {
+                let left = frames
+                    .iter()
+                    .map(|f| f.offset.x)
+                    .fold(f64::INFINITY, f64::min);
+                let bottom = frames
+                    .iter()
+                    .map(|f| f.offset.y)
+                    .fold(f64::INFINITY, f64::min);
+                let right = frames
+                    .iter()
+                    .map(|f| f.offset.x + f.source.size.width)
+                    .fold(0., f64::max);
+                let top = frames
+                    .iter()
+                    .map(|f| f.offset.y + f.source.size.height)
+                    .fold(0., f64::max);
+                let canvas = NSSize::new(right - left, top - bottom);
+                reference.width = reference.width.max(canvas.width);
+                reference.height = reference.height.max(canvas.height);
+                for f in &mut frames {
+                    f.offset.x -= left;
+                    f.offset.y -= bottom;
+                    f.canvas = canvas;
+                }
             }
             states.insert(key, frames);
         }
@@ -249,6 +326,7 @@ impl SpritePack {
             path: root,
             accent: palette.dominant(),
             pixel_art: manifest.pixel_art,
+            reference,
         })
     }
     fn frames(&self, activity: Activity) -> &[Frame] {
@@ -291,16 +369,20 @@ impl SpritePack {
             self.frames(activity)
         };
         let frame = &frames[index % frames.len()];
-        let scale = (bounds.size.width / frame.source.size.width)
-            .min(bounds.size.height / frame.source.size.height);
+        let scale = (bounds.size.width / self.reference.width)
+            .min(bounds.size.height / self.reference.height);
         let size = NSSize::new(
             frame.source.size.width * scale,
             frame.source.size.height * scale,
         );
         let dst = NSRect::new(
             NSPoint::new(
-                bounds.origin.x + (bounds.size.width - size.width) / 2.,
-                bounds.origin.y + (bounds.size.height - size.height) / 2.,
+                bounds.origin.x
+                    + (bounds.size.width - frame.canvas.width * scale) / 2.
+                    + frame.offset.x * scale,
+                bounds.origin.y
+                    + (bounds.size.height - frame.canvas.height * scale) / 2.
+                    + frame.offset.y * scale,
             ),
             size,
         );
@@ -326,6 +408,24 @@ impl SpritePack {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn transparent_padding_does_not_determine_sprite_scale() {
+        let mut alpha = vec![0u8; 24 * 80];
+        for y in 8..32 {
+            for x in 1..23 {
+                alpha[y * 24 + x] = 255;
+            }
+        }
+        let bounds = opaque_bounds(
+            24,
+            80,
+            &alpha,
+            NSRect::new(NSPoint::new(0., 0.), NSSize::new(24., 80.)),
+        )
+        .unwrap();
+        assert_eq!(bounds.size, NSSize::new(22., 24.));
+        assert_eq!(bounds.origin.y, 48.);
+    }
     #[test]
     fn validates_sheet_crops_and_requires_an_idle_fallback() {
         let mut m:Manifest=serde_json::from_str(r#"{"version":1,"idle":["idle.png"],"working":[{"file":"sheet.png","x":0,"y":0,"width":64,"height":64}]}"#).unwrap();
