@@ -28,6 +28,8 @@ pub enum Control {
     ResetPlacement,
     NextSession,
     ReloadSprites,
+    ChooseSprites,
+    UseCat,
     Status,
     LoadSprites { path: PathBuf },
 }

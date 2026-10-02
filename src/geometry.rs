@@ -83,6 +83,17 @@ impl Placement {
         }
     }
     /// The pointer can reach the physical edge through Dock/menu-bar insets.
+    pub fn tucked_frame(self, physical: Rect) -> Rect {
+        let mut r = self.frame(true);
+        match self.edge {
+            Some(Edge::Left) => r.x = physical.x,
+            Some(Edge::Right) => r.x = physical.x + physical.w - TAB_SIZE,
+            Some(Edge::Bottom) => r.y = physical.y,
+            Some(Edge::Top) => r.y = physical.y + physical.h - TAB_SIZE,
+            None => {}
+        }
+        r
+    }
     pub fn activation(self, physical: Rect) -> Rect {
         let mut r = self.frame(false);
         match self.edge {
@@ -171,6 +182,7 @@ mod tests {
         });
         p.edge = Some(Edge::Bottom);
         p.align();
+        assert_eq!(p.tucked_frame(physical).y, 0.);
         assert!(p.activation(physical).contains(Point {
             x: p.origin.x + 56.,
             y: 0.

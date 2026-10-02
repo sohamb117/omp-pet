@@ -345,6 +345,9 @@ impl SpritePack {
             frames
         }
     }
+    pub fn scale(&self, w: f64, h: f64) -> f64 {
+        (w / self.reference.width).min(h / self.reference.height)
+    }
     pub fn animated(&self, activity: Activity) -> bool {
         self.frames(activity).len() > 1
     }

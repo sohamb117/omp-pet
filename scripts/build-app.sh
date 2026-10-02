@@ -9,7 +9,7 @@ case "$profile" in
 esac
 app="$PWD/dist/OMP Pet.app"
 mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
-cp -R assets/zorua "$app/Contents/Resources/"
+if [ -d "$app/Contents/Resources/zorua" ]; then rm -r "$app/Contents/Resources/zorua"; fi
 cp "target/$profile/omp-pet" "$app/Contents/MacOS/omp-pet"
 cat > "$app/Contents/Info.plist" <<'PLIST'
 <?xml version="1.0" encoding="UTF-8"?>

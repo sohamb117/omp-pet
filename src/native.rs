@@ -107,18 +107,6 @@ define_class!(
     }
 );
 
-fn default_sprite_path() -> Option<std::path::PathBuf> {
-    let bundle = objc2_foundation::NSBundle::mainBundle();
-    let packaged = bundle
-        .resourcePath()
-        .map(|p| std::path::PathBuf::from(p.to_string()).join("zorua"));
-    packaged
-        .filter(|p| p.join("manifest.json").is_file())
-        .or_else(|| {
-            let local = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("assets/zorua");
-            local.join("manifest.json").is_file().then_some(local)
-        })
-}
 fn cursor() -> Point {
     let p = NSEvent::mouseLocation();
     Point { x: p.x, y: p.y }
@@ -191,7 +179,7 @@ fn draw_pet(ivars: &PetIvars) {
         oval(rect(34., 47., 9., 5.), &color(0.96, 0.62, 0.64, 0.75));
         oval(rect(73., 47., 9., 5.), &color(0.96, 0.62, 0.64, 0.75));
     }
-    rounded(rect(29., 13., 54., 2.), 1., &color(0.10, 0.13, 0.18, 0.35));
+    rounded(rect(29., 13., 54., 4.), 2., &color(0.10, 0.13, 0.18, 0.35));
     if let Some(c) = ivars.context.borrow().as_ref() {
         let rgb = ivars
             .sprites
@@ -204,7 +192,7 @@ fn draw_pet(ivars: &PetIvars) {
             rgb[2] as f64 / 255.,
             1.,
         );
-        rounded(rect(29., 13., 54. * c.percent / 100., 2.), 1., &fill);
+        rounded(rect(29., 13., 54. * c.percent / 100., 4.), 2., &fill);
     }
     let activity = ivars.activity.get();
     if activity != Activity::Idle {
@@ -281,6 +269,7 @@ struct AppUi {
     hide_timer: Option<Retained<NSTimer>>,
     drag_offset: Option<Point>,
     monitors: Vec<Retained<AnyObject>>,
+    edge_watch: Option<Retained<NSTimer>>,
 }
 impl AppUi {
     fn new(mtm: MainThreadMarker, delegate: &Delegate, demo: bool, readout: bool) -> Self {
@@ -309,7 +298,6 @@ impl AppUi {
         if let Some(path) = std::env::var_os("OMP_PET_SPRITES")
             .map(std::path::PathBuf::from)
             .or(prefs.sprites)
-            .or_else(default_sprite_path)
         {
             match SpritePack::load(&path, mtm) {
                 Ok(pack) => *view.ivars().sprites.borrow_mut() = Some(pack),
@@ -343,11 +331,6 @@ impl AppUi {
             ("Show task readout", sel!(toggleReadout:)),
             ("Next session", sel!(nextSession:)),
             ("Tuck / reveal", sel!(toggleTuck:)),
-            ("Choose sprite pack…", sel!(chooseSprites:)),
-            ("Reload sprites", sel!(reloadSprites:)),
-            ("Use bundled Zorua", sel!(clearSprites:)),
-            ("Reset placement", sel!(resetPlacement:)),
-            ("Quit OMP Pet", sel!(quit:)),
         ] {
             let item = unsafe {
                 menu.addItemWithTitle_action_keyEquivalent(
@@ -383,8 +366,10 @@ impl AppUi {
             hide_timer: None,
             drag_offset: None,
             monitors: Vec::new(),
+            edge_watch: None,
         };
         ui.refresh();
+        ui.sync_edge_watch();
         ui.pet.orderFrontRegardless();
         if readout {
             ui.show_readout();
@@ -523,11 +508,13 @@ impl AppUi {
         let pack = SpritePack::load(path, self.pet.mtm())?;
         *self.view.ivars().sprites.borrow_mut() = Some(pack);
         cancel(&mut self.animation);
+        self.view.ivars().phase.set(0);
+        self.view.ivars().celebrate.set(false);
         self.refresh();
         self.save_preferences();
         Ok(())
     }
-    fn reload_sprites(&mut self) {
+    fn reload_sprites(&mut self) -> Result<(), String> {
         let path = self
             .view
             .ivars()
@@ -536,9 +523,9 @@ impl AppUi {
             .as_ref()
             .map(|pack| pack.path.clone());
         if let Some(path) = path {
-            if let Err(e) = self.load_sprites(&path) {
-                eprintln!("Could not reload sprites: {e}");
-            }
+            self.load_sprites(&path)
+        } else {
+            Ok(())
         }
     }
     fn install_monitors(&mut self) {
@@ -558,20 +545,31 @@ impl AppUi {
             self.monitors.push(m);
         }
     }
-    fn edge_hit(&self, p: Point) -> bool {
-        if self.placement.edge.is_none() {
-            return false;
+    // Mouse monitors can miss transitions at a desktop edge. Check only while docked.
+    fn sync_edge_watch(&mut self) {
+        if self.placement.edge.is_some() && self.edge_watch.is_none() {
+            self.edge_watch = Some(timer(0.125, true, || with_ui(|ui| ui.pointer_moved())));
+        } else if self.placement.edge.is_none() {
+            cancel(&mut self.edge_watch);
         }
+    }
+    fn physical_screen(&self) -> Rect {
         let center = Point {
             x: self.placement.origin.x + PET_SIZE / 2.,
             y: self.placement.origin.y + PET_SIZE / 2.,
         };
         let screens = NSScreen::screens(self.pet.mtm());
-        let physical = screens
+        screens
             .iter()
             .find(|s| rustrect(s.frame()).contains(center))
-            .map_or(self.placement.screen, |s| rustrect(s.frame()));
-        self.placement.activation(physical).contains(p)
+            .map_or(self.placement.screen, |s| rustrect(s.frame()))
+    }
+    fn edge_hit(&self, p: Point) -> bool {
+        self.placement.edge.is_some()
+            && self
+                .placement
+                .activation(self.physical_screen())
+                .contains(p)
     }
     fn pointer_moved(&mut self) {
         if self.drag_offset.is_some() {
@@ -637,7 +635,7 @@ impl AppUi {
             if !self.readout_pinned && self.card.isVisible() {
                 self.card.orderOut(None);
             }
-            if self.placement.edge.is_some() && self.hide_timer.is_none() && !self.readout_pinned {
+            if self.placement.edge.is_some() && self.hide_timer.is_none() {
                 self.hide_timer = Some(timer(0.8, false, || {
                     with_ui(|ui| {
                         ui.hide_timer.take();
@@ -658,13 +656,18 @@ impl AppUi {
         cancel(&mut self.hide_timer);
         self.view.ivars().tucked.set(tucked);
         self.pet.setIgnoresMouseEvents(false);
-        let frame = nsrect(self.placement.frame(tucked));
+        let frame = nsrect(if tucked {
+            self.placement.tucked_frame(self.physical_screen())
+        } else {
+            self.placement.frame(false)
+        });
         self.pet.setContentMinSize(NSSize::new(0., 0.));
         self.pet.setContentMaxSize(frame.size);
         self.pet.setContentMinSize(frame.size);
         self.pet.setFrame_display(frame, true);
         self.card.orderOut(None);
         self.sync_animation();
+        self.sync_edge_watch();
         self.view.setNeedsDisplay(true);
     }
     fn begin_drag(&mut self) {
@@ -745,29 +748,6 @@ define_class!(
         }); }
     }
     impl Delegate {
-        #[unsafe(method(chooseSprites:))]
-        fn choose_sprites(&self,_sender:Option<&AnyObject>) {
-            let picker=NSOpenPanel::openPanel(self.mtm());
-            picker.setCanChooseDirectories(true); picker.setCanChooseFiles(false);
-            picker.setAllowsMultipleSelection(false);
-            picker.setMessage(Some(&NSString::from_str("Choose a sprite pack folder containing manifest.json")));
-            if picker.runModal()==NSModalResponseOK {
-                if let Some(path)=picker.URL().and_then(|url|url.path()) {
-                    let mut failure=None;
-                    with_ui(|ui| { failure=ui.load_sprites(std::path::Path::new(&path.to_string())).err(); });
-                    if let Some(error)=failure {
-                        let alert=NSAlert::new(self.mtm()); alert.setMessageText(&NSString::from_str("Could not load sprite pack"));
-                        alert.setInformativeText(&NSString::from_str(&error)); alert.runModal();
-                    }
-                }
-            }
-        }
-        #[unsafe(method(reloadSprites:))]
-        fn reload_sprites(&self,_sender:Option<&AnyObject>) { with_ui(|ui|ui.reload_sprites()); }
-        #[unsafe(method(clearSprites:))]
-        fn clear_sprites(&self,_sender:Option<&AnyObject>) { with_ui(|ui| {
-            if let Some(path)=default_sprite_path() { let _=ui.load_sprites(&path); }
-        }); }
         #[unsafe(method(toggleReadout:))]
         fn toggle_readout(&self,_sender:Option<&AnyObject>) { with_ui(|ui| {
             ui.readout_pinned=!ui.readout_pinned;
@@ -781,17 +761,42 @@ define_class!(
             if ui.placement.edge.is_none() { ui.placement.edge=Some(crate::geometry::Edge::Right); ui.placement.align(); }
             ui.readout_pinned=false; ui.set_tucked(tucked); ui.save_preferences();
         }); }
-        #[unsafe(method(resetPlacement:))]
-        fn reset_placement(&self,_sender:Option<&AnyObject>) { with_ui(|ui| {
-            ui.placement=Placement::new(rustrect(NSScreen::mainScreen(self.mtm()).unwrap().visibleFrame()));
-            ui.set_tucked(false); ui.refresh(); ui.save_preferences();
-        }); }
-        #[unsafe(method(quit:))]
-        fn quit(&self,_sender:Option<&AnyObject>) { NSApplication::sharedApplication(self.mtm()).terminate(None); }
+
     }
 );
 
+fn choose_sprites(mtm: MainThreadMarker) {
+    let picker = NSOpenPanel::openPanel(mtm);
+    picker.setCanChooseDirectories(true);
+    picker.setCanChooseFiles(false);
+    picker.setAllowsMultipleSelection(false);
+    picker.setMessage(Some(&NSString::from_str(
+        "Choose a sprite pack folder containing manifest.json",
+    )));
+    if picker.runModal() == NSModalResponseOK {
+        if let Some(path) = picker.URL().and_then(|url| url.path()) {
+            let mut failure = None;
+            with_ui(|ui| {
+                failure = ui
+                    .load_sprites(std::path::Path::new(&path.to_string()))
+                    .err()
+            });
+            if let Some(error) = failure {
+                let alert = NSAlert::new(mtm);
+                alert.setMessageText(&NSString::from_str("Could not load sprite pack"));
+                alert.setInformativeText(&NSString::from_str(&error));
+                alert.runModal();
+            }
+        }
+    }
+}
+
 pub fn event(event: Event) {
+    if let Event::Control(Control::ChooseSprites, reply) = event {
+        let _ = reply.send("{\"ok\":true,\"picker\":true}".into());
+        choose_sprites(MainThreadMarker::new().unwrap());
+        return;
+    }
     // terminate synchronously invokes applicationWillTerminate; release UI borrows first.
     if let Event::Control(Control::Quit, reply) = event {
         let _ = reply.send("{\"ok\":true}".into());
@@ -807,7 +812,16 @@ pub fn event(event: Event) {
             Event::Control(control, reply) => {
                 let mut error = None;
                 match control {
-                    Control::Quit => unreachable!("handled before borrowing UI"),
+                    Control::Quit | Control::ChooseSprites => {
+                        unreachable!("handled before borrowing UI")
+                    }
+                    Control::UseCat => {
+                        ui.view.ivars().sprites.borrow_mut().take();
+                        cancel(&mut ui.animation);
+                        ui.view.ivars().celebrate.set(false);
+                        ui.refresh();
+                        ui.save_preferences();
+                    }
                     Control::Readout => {
                         ui.readout_pinned = true;
                         ui.set_tucked(false);
@@ -820,19 +834,23 @@ pub fn event(event: Event) {
                         }
                         ui.readout_pinned = false;
                         ui.set_tucked(true);
+                        ui.save_preferences();
                     }
                     Control::Reveal => ui.set_tucked(false),
                     Control::ResetPlacement => {
                         ui.placement = Placement::new(screen_at(cursor(), ui.pet.mtm()));
                         ui.set_tucked(false);
+                        ui.save_preferences();
                     }
                     Control::NextSession => ui.sessions.cycle(),
-                    Control::ReloadSprites => ui.reload_sprites(),
+                    Control::ReloadSprites => error = ui.reload_sprites().err(),
                     Control::LoadSprites { path } => error = ui.load_sprites(&path).err(),
                     Control::Status => {}
                 }
                 let status = serde_json::json!({"ok":error.is_none(),"error":error,"pid":std::process::id(),
-                    "tucked":ui.view.ivars().tucked.get(),"readout":ui.card.isVisible(),
+                    "tucked":ui.view.ivars().tucked.get(),"readout":ui.card.isVisible(),"readout_pinned":ui.readout_pinned,
+                    "edge_watch":ui.edge_watch.is_some(),"cursor":cursor(),
+                    "sprite_scale":ui.view.ivars().sprites.borrow().as_ref().map(|p|p.scale(80.,76.)),
                     "frame":rustrect(ui.pet.frame()),"activity":ui.sessions.activity(),
                     "sprites":ui.view.ivars().sprites.borrow().as_ref().map(|p|p.path.clone()),
                     "accent":ui.view.ivars().sprites.borrow().as_ref().map(|p|p.accent),

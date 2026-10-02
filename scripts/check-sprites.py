@@ -3,7 +3,8 @@
 import json
 import struct
 from pathlib import Path
-root = Path(__file__).resolve().parents[1] / 'assets/zorua'
+import sys
+root = Path(sys.argv[1]) if len(sys.argv)>1 else Path(__file__).resolve().parents[1] / 'work/sprite-packs/zorua'
 manifest = json.loads((root / 'manifest.json').read_text())
 count = 0
 for state, frames in manifest.items():
