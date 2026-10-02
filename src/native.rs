@@ -146,8 +146,13 @@ fn panel(mtm:MainThreadMarker,bounds:NSRect,title:&str) -> Retained<PetPanel> {
     panel.setTitle(&NSString::from_str(title));
     panel.setOpaque(false); panel.setBackgroundColor(Some(&NSColor::clearColor()));
     panel.setHasShadow(false); panel.setLevel(3); panel.setHidesOnDeactivate(false);
+    panel.setMovable(false); // All dragging is handled by PetView, never the window server.
+    panel.setMovableByWindowBackground(false);
+    panel.setExcludedFromWindowsMenu(true);
+    panel.setContentMinSize(bounds.size); panel.setContentMaxSize(bounds.size);
     panel.setCollectionBehavior(NSWindowCollectionBehavior::CanJoinAllSpaces
-        | NSWindowCollectionBehavior::FullScreenAuxiliary | NSWindowCollectionBehavior::IgnoresCycle);
+        | NSWindowCollectionBehavior::FullScreenAuxiliary | NSWindowCollectionBehavior::IgnoresCycle
+        | NSWindowCollectionBehavior::Stationary | NSWindowCollectionBehavior::FullScreenDisallowsTiling);
     panel
 }
 
@@ -172,6 +177,9 @@ impl AppUi {
         let placement=Placement::new(screen);
         let pet=panel(mtm,nsrect(placement.frame(false)),"OMP Pet");
         let view=PetView::new(mtm); pet.setContentView(Some(&view));
+        view.setAccessibilityElement(true);
+        view.setAccessibilityRole(Some(unsafe { NSAccessibilityImageRole }));
+        view.setAccessibilityLabel(Some(&NSString::from_str("OMP Pet desktop companion")));
         pet.setAcceptsMouseMovedEvents(true);
         let card=panel(mtm,rect(0.,0.,320.,190.),"OMP Pet — task readout");
         let content:Retained<CardView>=unsafe { msg_send![CardView::alloc(mtm),initWithFrame:rect(0.,0.,320.,190.)] };
@@ -283,7 +291,9 @@ impl AppUi {
         cancel(&mut self.reveal_timer); cancel(&mut self.hide_timer);
         self.view.ivars().tucked.set(tucked);
         self.pet.setIgnoresMouseEvents(false);
-        self.pet.setFrame_display(nsrect(self.placement.frame(tucked)),true);
+        let frame=nsrect(self.placement.frame(tucked));
+        self.pet.setContentMinSize(frame.size); self.pet.setContentMaxSize(frame.size);
+        self.pet.setFrame_display(frame,true);
         self.card.orderOut(None); self.sync_animation(); self.view.setNeedsDisplay(true);
     }
     fn begin_drag(&mut self) {
