@@ -82,6 +82,33 @@ impl Placement {
             None => {}
         }
     }
+    /// The pointer can reach the physical edge through Dock/menu-bar insets.
+    pub fn activation(self, physical: Rect) -> Rect {
+        let mut r = self.frame(false);
+        match self.edge {
+            Some(Edge::Left) => {
+                r.x = physical.x;
+                r.w = (self.screen.x - physical.x + 8.).max(8.);
+            }
+            Some(Edge::Right) => {
+                r.x = self.screen.x + self.screen.w - 8.;
+                r.w = (physical.x + physical.w - r.x).max(8.);
+            }
+            Some(Edge::Bottom) => {
+                r.y = physical.y;
+                r.h = (self.screen.y - physical.y + 8.).max(8.);
+            }
+            Some(Edge::Top) => {
+                r.y = self.screen.y + self.screen.h - 8.;
+                r.h = (physical.y + physical.h - r.y).max(8.);
+            }
+            None => {
+                r.w = 0.;
+                r.h = 0.;
+            }
+        }
+        r
+    }
     pub fn frame(self, tucked: bool) -> Rect {
         let mut r = Rect {
             x: self.origin.x,
@@ -127,6 +154,31 @@ mod tests {
         assert_eq!(tab.h, PET_SIZE);
         assert!(tab.contains(Point { x: -1., y: 500. }));
         assert!(!tab.contains(Point { x: -1., y: 700. }));
+    }
+    #[test]
+    fn activation_reaches_physical_edge_across_dock_inset() {
+        let physical = Rect {
+            x: 0.,
+            y: 0.,
+            w: 1512.,
+            h: 982.,
+        };
+        let mut p = Placement::new(Rect {
+            x: 0.,
+            y: 80.,
+            w: 1512.,
+            h: 869.,
+        });
+        p.edge = Some(Edge::Bottom);
+        p.align();
+        assert!(p.activation(physical).contains(Point {
+            x: p.origin.x + 56.,
+            y: 0.
+        }));
+        assert!(!p.activation(physical).contains(Point {
+            x: p.origin.x - 10.,
+            y: 0.
+        }));
     }
     #[test]
     fn screen_changes_clamp_floating_and_docked_positions() {

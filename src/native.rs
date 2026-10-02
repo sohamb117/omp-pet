@@ -558,18 +558,33 @@ impl AppUi {
             self.monitors.push(m);
         }
     }
+    fn edge_hit(&self, p: Point) -> bool {
+        if self.placement.edge.is_none() {
+            return false;
+        }
+        let center = Point {
+            x: self.placement.origin.x + PET_SIZE / 2.,
+            y: self.placement.origin.y + PET_SIZE / 2.,
+        };
+        let screens = NSScreen::screens(self.pet.mtm());
+        let physical = screens
+            .iter()
+            .find(|s| rustrect(s.frame()).contains(center))
+            .map_or(self.placement.screen, |s| rustrect(s.frame()));
+        self.placement.activation(physical).contains(p)
+    }
     fn pointer_moved(&mut self) {
         if self.drag_offset.is_some() {
             return;
         }
         let p = cursor();
         if self.view.ivars().tucked.get() {
-            if self.placement.frame(true).contains(p) && NSEvent::pressedMouseButtons() == 0 {
+            if self.edge_hit(p) && NSEvent::pressedMouseButtons() == 0 {
                 if self.reveal_timer.is_none() {
                     self.reveal_timer = Some(timer(0.20, false, || {
                         with_ui(|ui| {
                             ui.reveal_timer.take();
-                            if ui.placement.frame(true).contains(cursor()) {
+                            if ui.edge_hit(cursor()) {
                                 ui.set_tucked(false);
                                 ui.pointer_moved();
                             }
@@ -612,7 +627,7 @@ impl AppUi {
         if self.pet.ignoresMouseEvents() == sprite_hit {
             self.pet.setIgnoresMouseEvents(!sprite_hit);
         }
-        if pet_hit || card_hit {
+        if pet_hit || card_hit || self.edge_hit(p) {
             cancel(&mut self.hide_timer);
             if pet_hit && !self.card.isVisible() {
                 self.refresh();
@@ -627,7 +642,8 @@ impl AppUi {
                     with_ui(|ui| {
                         ui.hide_timer.take();
                         let p = cursor();
-                        if !ui.placement.frame(false).contains(p)
+                        if !ui.edge_hit(p)
+                            && !ui.placement.frame(false).contains(p)
                             && !(ui.card.isVisible() && rustrect(ui.card.frame()).contains(p))
                         {
                             ui.set_tucked(true);

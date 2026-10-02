@@ -38,12 +38,13 @@ impl Sessions {
                     && s.snapshot.activity == snapshot.activity
             })
             .map_or(now, |s| s.last_activity);
+        let connected = snapshot.activity != Activity::Disconnected;
         self.entries.insert(
             snapshot.session_id.clone(),
             Session {
                 snapshot,
                 connection,
-                connected: true,
+                connected,
                 last_activity,
             },
         );
