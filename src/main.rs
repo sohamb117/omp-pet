@@ -1,5 +1,6 @@
 mod model;
+mod native;
 
 fn main() {
-    println!("OMP Pet: {}", model::Snapshot::demo().activity.label());
+    native::run();
 }
