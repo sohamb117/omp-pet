@@ -5,7 +5,7 @@ import json
 import os
 import socket
 parser = argparse.ArgumentParser()
-parser.add_argument("control", choices=["quit", "readout", "tuck", "reveal", "reset_placement", "next_session", "reload_sprites", "status", "load_sprites", "choose_sprites", "use_cat"])
+parser.add_argument("control", choices=["quit", "readout", "tuck", "reveal", "reset_placement", "next_session", "reload_sprites", "status", "load_sprites", "choose_sprites", "use_cat", "show_pet"])
 parser.add_argument("--socket", default=os.environ.get("OMP_PET_SOCKET", f"/tmp/omp-pet-{os.getuid()}/events.sock"))
 parser.add_argument("--pack", help="Sprite folder for load_sprites")
 args = parser.parse_args()

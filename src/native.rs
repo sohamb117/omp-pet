@@ -96,15 +96,27 @@ define_class!(
     }
 );
 
+struct CardIvars {
+    accent: Cell<[u8; 3]>,
+}
+impl Default for CardIvars {
+    fn default() -> Self {
+        Self {
+            accent: Cell::new(crate::palette::FALLBACK),
+        }
+    }
+}
 define_class!(
     #[unsafe(super = NSView)]
     #[thread_kind = MainThreadOnly]
+    #[ivars = CardIvars]
     struct CardView;
     unsafe impl NSObjectProtocol for CardView {}
     impl CardView {
         #[unsafe(method(drawRect:))]
         fn draw(&self, _rect: NSRect) {
-            rounded(self.bounds(), 16., &color(0.07, 0.10, 0.14, 0.98));
+            let c=self.ivars().accent.get();
+            rounded(self.bounds(),12.,&color(c[0] as f64/255.*0.45,c[1] as f64/255.*0.45,c[2] as f64/255.*0.45,0.98));
         }
     }
 );
@@ -165,9 +177,15 @@ fn draw_pet(ivars: &PetIvars) {
             ivars.activity.get(),
             ivars.phase.get(),
             ivars.celebrate.get(),
-            rect(16., 24., 80., 76.),
+            rect(0., 0., PET_SIZE, PET_SIZE),
         );
     } else {
+        NSGraphicsContext::saveGraphicsState_class();
+        let transform = objc2_foundation::NSAffineTransform::transform();
+        transform.translateXBy_yBy(56., 56.);
+        transform.scaleBy(112. / 68.);
+        transform.translateXBy_yBy(-57., -61.);
+        transform.concat();
         oval(rect(23., 19., 67., 9.), &color(0., 0., 0., 0.12));
         rounded(rect(26., 27., 62., 58.), 23., &ink);
         oval(rect(26., 70., 23., 25.), &ink);
@@ -180,8 +198,9 @@ fn draw_pet(ivars: &PetIvars) {
         rounded(rect(52., 46., 10., 3.), 1.5, &ink);
         oval(rect(34., 47., 9., 5.), &color(0.96, 0.62, 0.64, 0.75));
         oval(rect(73., 47., 9., 5.), &color(0.96, 0.62, 0.64, 0.75));
+        NSGraphicsContext::restoreGraphicsState_class();
     }
-    rounded(rect(29., 13., 54., 4.), 2., &color(0.10, 0.13, 0.18, 0.35));
+    rounded(rect(29., 4., 54., 4.), 2., &color(0.10, 0.13, 0.18, 0.35));
     if let Some(c) = ivars.context.borrow().as_ref() {
         let rgb = ivars
             .sprites
@@ -194,7 +213,7 @@ fn draw_pet(ivars: &PetIvars) {
             rgb[2] as f64 / 255.,
             1.,
         );
-        rounded(rect(29., 13., 54. * c.percent / 100., 4.), 2., &fill);
+        rounded(rect(29., 4., 54. * c.percent / 100., 4.), 2., &fill);
     }
     let activity = ivars.activity.get();
     if activity != Activity::Idle {
@@ -261,6 +280,8 @@ struct AppUi {
     view: Retained<PetView>,
     card: Retained<PetPanel>,
     labels: Vec<Retained<NSTextField>>,
+    card_view: Retained<CardView>,
+    visible_until: Option<std::time::Instant>,
     menu: Retained<NSMenu>,
     _status: Retained<NSStatusItem>,
     sessions: Sessions,
@@ -306,19 +327,14 @@ impl AppUi {
                 Err(e) => eprintln!("Could not load sprite pack: {e}"),
             }
         }
-        let card = panel(mtm, rect(0., 0., 320., 190.), "OMP Pet — task readout");
+        let card = panel(mtm, rect(0., 0., 280., 116.), "OMP Pet — task readout");
+        let card_alloc = CardView::alloc(mtm).set_ivars(CardIvars::default());
         let content: Retained<CardView> =
-            unsafe { msg_send![CardView::alloc(mtm),initWithFrame:rect(0.,0.,320.,190.)] };
+            unsafe { msg_send![super(card_alloc),initWithFrame:rect(0.,0.,280.,116.)] };
         let mut labels = Vec::new();
-        for (y, height, size) in [
-            (157., 18., 11.),
-            (104., 44., 16.),
-            (76., 18., 12.),
-            (48., 18., 12.),
-            (20., 18., 11.),
-        ] {
+        for (y, height, size) in [(88., 16., 11.), (39., 38., 14.), (12., 18., 12.)] {
             let label = NSTextField::labelWithString(&NSString::from_str(""), mtm);
-            label.setFrame(rect(18., y, 284., height));
+            label.setFrame(rect(18., y, 244., height));
             label.setFont(Some(&NSFont::systemFontOfSize(size)));
             label.setTextColor(Some(&color(0.90, 0.94, 0.96, 1.)));
             label.setMaximumNumberOfLines(if height > 20. { 2 } else { 1 });
@@ -330,7 +346,7 @@ impl AppUi {
         let menu = NSMenu::new(mtm);
         menu.setAutoenablesItems(false);
         for (title, action) in [
-            ("Show task readout", sel!(toggleReadout:)),
+            ("Pin readout", sel!(toggleReadout:)),
             ("Next session", sel!(nextSession:)),
             ("Tuck / reveal", sel!(toggleTuck:)),
         ] {
@@ -358,6 +374,8 @@ impl AppUi {
             view,
             card,
             labels,
+            card_view: content,
+            visible_until: None,
             menu,
             _status: status,
             sessions,
@@ -399,44 +417,59 @@ impl AppUi {
             .sessions
             .current()
             .and_then(|s| s.snapshot.context.clone());
-        let (project, task, tool, context, footer) = if let Some(s) = self.sessions.current() {
-            (
-                format!("{} · {}", s.snapshot.project, activity.label()),
-                s.snapshot.task.clone(),
-                s.snapshot
+        let (project, step, usage) = if let Some(session) = self.sessions.current() {
+            let step = match activity {
+                Activity::Working => session
+                    .snapshot
                     .tool
                     .clone()
-                    .unwrap_or_else(|| activity.label().into()),
-                s.snapshot
-                    .context
-                    .as_ref()
-                    .map_or("Context unknown".into(), |c| {
-                        format!(
-                            "Context ≈ {:.0}% · {} / {} tokens",
-                            c.percent, c.tokens, c.window
-                        )
-                    }),
-                format!(
-                    "{} session(s) · state changed {}s ago",
-                    self.sessions.entries.len(),
-                    s.last_activity.elapsed().as_secs()
-                ),
-            )
+                    .unwrap_or_else(|| session.snapshot.task.clone()),
+                Activity::Waiting => "Awaiting approval".into(),
+                Activity::Compacting => "Compacting context".into(),
+                Activity::Error => "Error".into(),
+                Activity::Disconnected => "Disconnected".into(),
+                Activity::Idle => "Ready".into(),
+            };
+            let usage = session
+                .snapshot
+                .context
+                .as_ref()
+                .map_or("— · —%".into(), |c| {
+                    format!("{} · {:.0}%", format_count(c.tokens), c.percent)
+                });
+            (session.snapshot.project.clone(), step, usage)
         } else {
-            (
-                "OMP PET · READY".into(),
-                "Your desktop companion".into(),
-                "Waiting for an oh-my-pi session".into(),
-                "Context unknown".into(),
-                "Drag to an edge to tuck away · right-click for options".into(),
-            )
+            ("OMP Pet".into(), "Ready".into(), "— · —%".into())
         };
-        for (label, text) in self
-            .labels
-            .iter()
-            .zip([project, task, tool, context, footer])
-        {
+        let accent = self
+            .view
+            .ivars()
+            .sprites
+            .borrow()
+            .as_ref()
+            .map_or(crate::palette::FALLBACK, |p| p.accent);
+        self.card_view.ivars().accent.set(accent);
+        self.card_view.setNeedsDisplay(true);
+        for (i, (label, text)) in self.labels.iter().zip([project, step, usage]).enumerate() {
             label.setStringValue(&NSString::from_str(&text));
+            let tint = if i == 1 {
+                color(0.98, 0.98, 0.98, 1.)
+            } else {
+                color(
+                    0.65 + accent[0] as f64 / 255. * 0.35,
+                    0.65 + accent[1] as f64 / 255. * 0.35,
+                    0.65 + accent[2] as f64 / 255. * 0.35,
+                    1.,
+                )
+            };
+            label.setTextColor(Some(&tint));
+        }
+        if let Some(item) = self.menu.itemAtIndex(0) {
+            item.setTitle(&NSString::from_str(if self.readout_pinned {
+                "Unpin readout"
+            } else {
+                "Pin readout"
+            }));
         }
         self.view.setNeedsDisplay(true);
         self.sync_animation();
@@ -604,10 +637,10 @@ impl AppUi {
             y: p.y - self.placement.origin.y,
         };
         let sprite_hit = Rect {
-            x: 16.,
-            y: 24.,
-            w: 80.,
-            h: 76.,
+            x: 0.,
+            y: 0.,
+            w: PET_SIZE,
+            h: PET_SIZE,
         }
         .contains(local)
             || Rect {
@@ -637,7 +670,12 @@ impl AppUi {
             if !self.readout_pinned && self.card.isVisible() {
                 self.card.orderOut(None);
             }
-            if self.placement.edge.is_some() && self.hide_timer.is_none() {
+            if self.placement.edge.is_some()
+                && self.hide_timer.is_none()
+                && self
+                    .visible_until
+                    .is_none_or(|until| std::time::Instant::now() >= until)
+            {
                 self.hide_timer = Some(timer(0.8, false, || {
                     with_ui(|ui| {
                         ui.hide_timer.take();
@@ -707,18 +745,18 @@ impl AppUi {
     fn show_readout(&self) {
         let p = self.placement.origin;
         let screen = self.placement.screen;
-        let x = if p.x - 328. >= screen.x {
-            p.x - 328.
+        let x = if p.x - 288. >= screen.x {
+            p.x - 288.
         } else {
             p.x + PET_SIZE + 8.
         };
         let origin = screen.clamp(
             Point {
                 x,
-                y: p.y + PET_SIZE - 190.,
+                y: p.y + PET_SIZE - 116.,
             },
-            320.,
-            190.,
+            280.,
+            116.,
         );
         self.card.setFrameOrigin(NSPoint::new(origin.x, origin.y));
         self.card.orderFrontRegardless();
@@ -754,6 +792,7 @@ define_class!(
         fn toggle_readout(&self,_sender:Option<&AnyObject>) { with_ui(|ui| {
             ui.readout_pinned=!ui.readout_pinned;
             if ui.readout_pinned { ui.show_readout(); } else { ui.card.orderOut(None); }
+            ui.refresh();
         }); }
         #[unsafe(method(nextSession:))]
         fn next_session(&self,_sender:Option<&AnyObject>) { with_ui(|ui| { ui.sessions.cycle(); ui.refresh(); }); }
@@ -766,6 +805,18 @@ define_class!(
 
     }
 );
+
+fn format_count(n: u64) -> String {
+    let s = n.to_string();
+    let mut out = String::new();
+    for (i, c) in s.chars().enumerate() {
+        if i > 0 && (s.len() - i) % 3 == 0 {
+            out.push(',');
+        }
+        out.push(c);
+    }
+    out
+}
 
 fn choose_sprites(mtm: MainThreadMarker) {
     let picker = NSOpenPanel::openPanel(mtm);
@@ -824,12 +875,19 @@ pub fn event(event: Event) {
                         ui.refresh();
                         ui.save_preferences();
                     }
+                    Control::ShowPet => {
+                        ui.readout_pinned = false;
+                        ui.visible_until =
+                            Some(std::time::Instant::now() + std::time::Duration::from_secs(5));
+                        ui.set_tucked(false);
+                    }
                     Control::Readout => {
                         ui.readout_pinned = true;
                         ui.set_tucked(false);
                         ui.show_readout();
                     }
                     Control::Tuck => {
+                        ui.visible_until = None;
                         if ui.placement.edge.is_none() {
                             ui.placement.edge = Some(crate::geometry::Edge::Right);
                             ui.placement.align();
@@ -852,7 +910,7 @@ pub fn event(event: Event) {
                 let status = serde_json::json!({"ok":error.is_none(),"error":error,"pid":std::process::id(),
                     "tucked":ui.view.ivars().tucked.get(),"readout":ui.card.isVisible(),"readout_pinned":ui.readout_pinned,
                     "edge_watch":ui.edge_watch.is_some(),"cursor":cursor(),"animation_running":ui.animation.is_some(),
-                    "sprite_scale":ui.view.ivars().sprites.borrow().as_ref().map(|p|p.scale(80.,76.)),
+                    "sprite_viewbox": {"width":PET_SIZE,"height":PET_SIZE},
                     "frame":rustrect(ui.pet.frame()),"activity":ui.sessions.activity(),
                     "sprites":ui.view.ivars().sprites.borrow().as_ref().map(|p|p.path.clone()),
                     "accent":ui.view.ivars().sprites.borrow().as_ref().map(|p|p.accent),

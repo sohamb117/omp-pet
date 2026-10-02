@@ -23,6 +23,7 @@ pub enum Event {
 pub enum Control {
     Quit,
     Readout,
+    ShowPet,
     Tuck,
     Reveal,
     ResetPlacement,
