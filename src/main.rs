@@ -1,4 +1,5 @@
 mod geometry;
+mod hover;
 mod ipc;
 mod model;
 mod native;

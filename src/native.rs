@@ -1,6 +1,7 @@
 //! AppKit objects and callbacks stay on the main thread.
 use crate::{
     geometry::{PET_SIZE, Placement, Point, Rect},
+    hover::HoverReveal,
     ipc::{Control, Event},
     model::{Activity, ContextUsage, Snapshot},
     preferences,
@@ -36,6 +37,7 @@ struct PetIvars {
     activity: Cell<Activity>,
     context: RefCell<Option<ContextUsage>>,
     tucked: Cell<bool>,
+    hovered: Cell<bool>,
     celebrate: Cell<bool>,
     sprites: RefCell<Option<SpritePack>>,
 }
@@ -59,10 +61,12 @@ define_class!(
                 transform.scaleBy(self.bounds().size.width/PET_SIZE); transform.concat();
                 draw_pet(self.ivars());
                 NSGraphicsContext::restoreGraphicsState_class();
+                if self.ivars().hovered.get() {
                 let grip=NSBezierPath::bezierPath(); grip.setLineWidth(1.2);
                 for d in [4.,8.] { grip.moveToPoint(NSPoint::new(self.bounds().size.width-3.-d,3.));
                     grip.lineToPoint(NSPoint::new(self.bounds().size.width-3.,3.+d)); }
                 color(0.95,0.95,0.95,0.8).setStroke(); grip.stroke();
+                }
             }
         }
         #[unsafe(method(mouseDown:))]
@@ -301,6 +305,7 @@ struct AppUi {
     drag_offset: Option<Point>,
     resize_start: Option<(Point, Placement)>,
     reveal_armed: bool,
+    hover_reveal: HoverReveal,
     monitors: Vec<Retained<AnyObject>>,
     edge_watch: Option<Retained<NSTimer>>,
 }
@@ -396,6 +401,7 @@ impl AppUi {
             drag_offset: None,
             resize_start: None,
             reveal_armed: true,
+            hover_reveal: HoverReveal::default(),
             monitors: Vec::new(),
             edge_watch: None,
         };
@@ -592,14 +598,16 @@ impl AppUi {
             self.monitors.push(m);
         }
     }
-    // Mouse monitors can miss transitions at a desktop edge. Check only while docked.
+    // Watch tucked pets and temporary hover reveals, including missed edge transitions.
     fn sync_edge_watch(&mut self) {
         if self.placement.edge.is_some()
-            && self.view.ivars().tucked.get()
+            && (self.view.ivars().tucked.get() || self.hover_reveal.active())
             && self.edge_watch.is_none()
         {
             self.edge_watch = Some(timer(0.125, true, || with_ui(|ui| ui.pointer_moved())));
-        } else if self.placement.edge.is_none() || !self.view.ivars().tucked.get() {
+        } else if self.placement.edge.is_none()
+            || !(self.view.ivars().tucked.get() || self.hover_reveal.active())
+        {
             cancel(&mut self.edge_watch);
         }
     }
@@ -642,6 +650,8 @@ impl AppUi {
                             ui.reveal_timer.take();
                             if ui.edge_hit(cursor()) {
                                 ui.set_tucked(false);
+                                ui.hover_reveal.start();
+                                ui.sync_edge_watch();
                                 ui.pointer_moved();
                             }
                         })
@@ -654,23 +664,40 @@ impl AppUi {
         }
         let pet_hit = self.placement.frame(false).contains(p);
         let card_hit = self.card.isVisible() && rustrect(self.card.frame()).contains(p);
+        if self.view.ivars().hovered.replace(pet_hit) != pet_hit {
+            self.view.setNeedsDisplay(true);
+        }
+        let inside = pet_hit || card_hit || self.edge_hit(p);
+        if self.hover_reveal.should_tuck(
+            inside || NSEvent::pressedMouseButtons() != 0,
+            self.readout_pinned,
+            std::time::Instant::now(),
+        ) {
+            self.set_tucked(true);
+            return;
+        }
         let sprite_hit = pet_hit;
         if self.pet.ignoresMouseEvents() == sprite_hit {
             self.pet.setIgnoresMouseEvents(!sprite_hit);
         }
-        if pet_hit || card_hit || self.edge_hit(p) {
+        if inside {
             if pet_hit && !self.card.isVisible() {
                 self.refresh();
                 self.show_readout();
             }
         } else {
-            if !self.readout_pinned && self.card.isVisible() {
+            if !self.readout_pinned && !self.hover_reveal.active() && self.card.isVisible() {
                 self.card.orderOut(None);
             }
         }
     }
     fn set_tucked(&mut self, tucked: bool) {
         cancel(&mut self.reveal_timer);
+        self.hover_reveal = HoverReveal::default();
+        self.view
+            .ivars()
+            .hovered
+            .set(!tucked && self.placement.frame(false).contains(cursor()));
         self.view.ivars().tucked.set(tucked);
         if tucked {
             self.reveal_armed = !self.edge_hit(cursor());
@@ -957,7 +984,7 @@ pub fn event(event: Event) {
                     Control::Status => {}
                 }
                 let status = serde_json::json!({"ok":error.is_none(),"error":error,"pid":std::process::id(),
-                    "tucked":ui.view.ivars().tucked.get(),"readout":ui.card.isVisible(),"readout_pinned":ui.readout_pinned,
+                    "tucked":ui.view.ivars().tucked.get(),"hover_revealed":ui.hover_reveal.active(),"grip_visible":ui.view.ivars().hovered.get(),"readout":ui.card.isVisible(),"readout_pinned":ui.readout_pinned,
                     "edge_watch":ui.edge_watch.is_some(),"cursor":cursor(),"animation_running":ui.animation.is_some(),
                     "sprite_viewbox": {"width":ui.placement.size,"height":ui.placement.size},
                     "card_frame":rustrect(ui.card.frame()),"auto_tuck":false,
