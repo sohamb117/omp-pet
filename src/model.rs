@@ -61,8 +61,10 @@ impl Snapshot {
         if self.session_id.is_empty() || self.session_id.len() > 256 {
             return Err("invalid session id");
         }
-        if self.task.len() > 2048 || self.project.len() > 1024
-            || self.tool.as_ref().is_some_and(|s| s.len() > 512) {
+        if self.task.len() > 2048
+            || self.project.len() > 1024
+            || self.tool.as_ref().is_some_and(|s| s.len() > 512)
+        {
             return Err("display text exceeds limit");
         }
         if let Some(c) = &self.context {
@@ -82,7 +84,11 @@ impl Snapshot {
             task: "Making a little home on your desktop".into(),
             activity: Activity::Working,
             tool: Some("Building the native companion".into()),
-            context: Some(ContextUsage { tokens: 42000, window: 100000, percent: 42.0 }),
+            context: Some(ContextUsage {
+                tokens: 42000,
+                window: 100000,
+                percent: 42.0,
+            }),
         }
     }
 }
@@ -106,7 +112,11 @@ mod tests {
         let mut s = Snapshot::demo();
         s.context = None;
         assert!(s.validate().is_ok());
-        s.context = Some(ContextUsage { tokens: 1000, window: 100000, percent: 1.0 });
+        s.context = Some(ContextUsage {
+            tokens: 1000,
+            window: 100000,
+            percent: 1.0,
+        });
         assert!(s.validate().is_ok());
         s.context.as_mut().unwrap().percent = f64::NAN;
         assert!(s.validate().is_err());

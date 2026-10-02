@@ -1,6 +1,6 @@
+use crate::model::{Activity, Snapshot};
 use std::collections::BTreeMap;
 use std::time::Instant;
-use crate::model::{Activity, Snapshot};
 
 #[derive(Debug)]
 pub struct Session {
@@ -18,44 +18,75 @@ pub struct Sessions {
 
 impl Sessions {
     pub fn update(&mut self, connection: u64, snapshot: Snapshot) -> bool {
-        if snapshot.validate().is_err() { return false; }
+        if snapshot.validate().is_err() {
+            return false;
+        }
         if let Some(old) = self.entries.get(&snapshot.session_id) {
-            if connection < old.connection || (connection == old.connection && snapshot.seq <= old.snapshot.seq) {
+            if connection < old.connection
+                || (connection == old.connection && snapshot.seq <= old.snapshot.seq)
+            {
                 return false;
             }
         }
         let now = Instant::now();
-        let last_activity = self.entries.get(&snapshot.session_id)
-            .filter(|s| s.snapshot.task == snapshot.task && s.snapshot.tool == snapshot.tool
-                && s.snapshot.activity == snapshot.activity)
+        let last_activity = self
+            .entries
+            .get(&snapshot.session_id)
+            .filter(|s| {
+                s.snapshot.task == snapshot.task
+                    && s.snapshot.tool == snapshot.tool
+                    && s.snapshot.activity == snapshot.activity
+            })
             .map_or(now, |s| s.last_activity);
-        self.entries.insert(snapshot.session_id.clone(), Session {
-            snapshot, connection, connected: true, last_activity,
-        });
+        self.entries.insert(
+            snapshot.session_id.clone(),
+            Session {
+                snapshot,
+                connection,
+                connected: true,
+                last_activity,
+            },
+        );
         true
     }
 
     pub fn disconnect(&mut self, connection: u64) {
-        for session in self.entries.values_mut().filter(|s| s.connection == connection) {
+        for session in self
+            .entries
+            .values_mut()
+            .filter(|s| s.connection == connection)
+        {
             session.connected = false;
         }
     }
 
     pub fn current(&self) -> Option<&Session> {
-        if let Some(s) = self.selected.as_ref().and_then(|id| self.entries.get(id)) { return Some(s); }
-        self.entries.values().max_by_key(|s| (s.connected, s.snapshot.activity.animates(), s.last_activity))
+        if let Some(s) = self.selected.as_ref().and_then(|id| self.entries.get(id)) {
+            return Some(s);
+        }
+        self.entries
+            .values()
+            .max_by_key(|s| (s.connected, s.snapshot.activity.animates(), s.last_activity))
     }
 
     pub fn cycle(&mut self) {
         let keys: Vec<_> = self.entries.keys().cloned().collect();
-        if keys.is_empty() { return; }
+        if keys.is_empty() {
+            return;
+        }
         let current = self.current().map(|s| &s.snapshot.session_id);
         let index = keys.iter().position(|id| Some(id) == current).unwrap_or(0);
         self.selected = Some(keys[(index + 1) % keys.len()].clone());
     }
 
     pub fn activity(&self) -> Activity {
-        self.current().map_or(Activity::Idle, |s| if s.connected { s.snapshot.activity } else { Activity::Disconnected })
+        self.current().map_or(Activity::Idle, |s| {
+            if s.connected {
+                s.snapshot.activity
+            } else {
+                Activity::Disconnected
+            }
+        })
     }
 }
 
