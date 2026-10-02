@@ -14,7 +14,7 @@ with socket.socket(socket.AF_UNIX) as client:
     client.connect(args.socket)
     command = {"load_sprites": {"path": os.path.abspath(args.pack)}} if args.control == "load_sprites" else args.control
     client.sendall((json.dumps({"control": command}) + "\n").encode())
-    client.settimeout(3)
+    client.settimeout(35)
     reply = client.makefile().readline()
     if not reply: raise SystemExit("Companion closed without acknowledging the command")
     response = json.loads(reply)

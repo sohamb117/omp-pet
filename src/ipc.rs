@@ -118,7 +118,7 @@ impl Server {
                                 let (send, receive) = std::sync::mpsc::sync_channel(1);
                                 deliver(Event::Control(control, send));
                                 if let Ok(response) =
-                                    receive.recv_timeout(std::time::Duration::from_secs(2))
+                                    receive.recv_timeout(std::time::Duration::from_secs(30))
                                 {
                                     use std::io::Write;
                                     let stream = reader.get_mut();
