@@ -87,6 +87,8 @@ define_class!(
     struct PetPanel;
     unsafe impl NSObjectProtocol for PetPanel {}
     impl PetPanel {
+        #[unsafe(method(accessibilityPerformRaise))]
+        fn accessibility_raise(&self) -> bool { self.orderFrontRegardless(); true }
         #[unsafe(method(canBecomeKeyWindow))]
         fn can_become_key(&self) -> bool { false }
         #[unsafe(method(canBecomeMainWindow))]
@@ -849,7 +851,7 @@ pub fn event(event: Event) {
                 }
                 let status = serde_json::json!({"ok":error.is_none(),"error":error,"pid":std::process::id(),
                     "tucked":ui.view.ivars().tucked.get(),"readout":ui.card.isVisible(),"readout_pinned":ui.readout_pinned,
-                    "edge_watch":ui.edge_watch.is_some(),"cursor":cursor(),
+                    "edge_watch":ui.edge_watch.is_some(),"cursor":cursor(),"animation_running":ui.animation.is_some(),
                     "sprite_scale":ui.view.ivars().sprites.borrow().as_ref().map(|p|p.scale(80.,76.)),
                     "frame":rustrect(ui.pet.frame()),"activity":ui.sessions.activity(),
                     "sprites":ui.view.ivars().sprites.borrow().as_ref().map(|p|p.path.clone()),
