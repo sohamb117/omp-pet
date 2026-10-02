@@ -7,7 +7,7 @@ impl Palette {
     pub fn add(&mut self, rgb: [u8; 3], alpha: u8) {
         let max = *rgb.iter().max().unwrap() as u16;
         let min = *rgb.iter().min().unwrap() as u16;
-        if alpha < 128 || max < 24 || max - min < 24 || (max - min) * 100 < max * 20 {
+        if alpha < 128 || max < 24 || max - min < 32 || (max - min) * 100 < max * 25 {
             return;
         }
         *self.0.entry(rgb).or_default() += 1;
@@ -29,6 +29,7 @@ mod tests {
             p.add([0, 0, 0], 255);
             p.add([255, 255, 255], 255);
             p.add([40, 42, 46], 255);
+            p.add([110, 111, 138], 255);
             p.add([255, 0, 0], 0);
         }
         for _ in 0..8 {
