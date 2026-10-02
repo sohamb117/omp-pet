@@ -425,12 +425,17 @@ define_class!(
 );
 
 pub fn event(event:Event) {
+    // terminate synchronously invokes applicationWillTerminate; release UI borrows first.
+    if matches!(event,Event::Control(Control::Quit)) {
+        NSApplication::sharedApplication(MainThreadMarker::new().unwrap()).terminate(None);
+        return;
+    }
     with_ui(|ui| {
         match event {
             Event::Snapshot(connection,snapshot) => { ui.sessions.update(connection,snapshot); }
             Event::Disconnected(connection) => ui.sessions.disconnect(connection),
             Event::Control(control) => match control {
-                Control::Quit => NSApplication::sharedApplication(ui.pet.mtm()).terminate(None),
+                Control::Quit => unreachable!("handled before borrowing UI"),
                 Control::Readout => { ui.readout_pinned=true; ui.set_tucked(false); ui.show_readout(); }
                 Control::Tuck => {
                     if ui.placement.edge.is_none() { ui.placement.edge=Some(crate::geometry::Edge::Right); ui.placement.align(); }
