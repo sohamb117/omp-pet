@@ -8,7 +8,7 @@ use objc2_app_kit::*;
 use objc2_foundation::{MainThreadMarker, NSNotification, NSObject, NSObjectProtocol,
     NSPoint, NSRect, NSSize, NSString, NSTimer};
 use crate::{geometry::{Placement, Point, Rect, PET_SIZE}, ipc::{Event,Control},
-    model::{Activity, ContextUsage, Snapshot}, sessions::Sessions};
+    model::{Activity, ContextUsage, Snapshot}, sessions::Sessions, sprites::SpritePack, preferences};
 
 thread_local! { static UI: RefCell<Option<AppUi>> = const { RefCell::new(None) }; }
 fn with_ui(f: impl FnOnce(&mut AppUi)) {
@@ -17,8 +17,8 @@ fn with_ui(f: impl FnOnce(&mut AppUi)) {
 
 #[derive(Default)]
 struct PetIvars {
-    phase: Cell<u8>, activity: Cell<Activity>, context: RefCell<Option<ContextUsage>>,
-    tucked: Cell<bool>,
+    phase: Cell<usize>, activity: Cell<Activity>, context: RefCell<Option<ContextUsage>>,
+    tucked: Cell<bool>, sprites: RefCell<Option<SpritePack>>,
 }
 
 define_class!(
@@ -108,6 +108,9 @@ fn oval(bounds:NSRect,fill:&NSColor) {
 }
 fn draw_pet(ivars:&PetIvars) {
     let ink=color(0.10,0.13,0.18,1.); let mint=color(0.64,0.89,0.77,1.);
+    if let Some(pack)=ivars.sprites.borrow().as_ref() {
+        pack.draw(ivars.activity.get(),ivars.phase.get(),rect(16.,24.,80.,76.));
+    } else {
     oval(rect(23.,19.,67.,9.), &color(0.,0.,0.,0.12));
     rounded(rect(26.,27.,62.,58.),23.,&ink);
     oval(rect(26.,70.,23.,25.),&ink); oval(rect(65.,70.,23.,25.),&ink);
@@ -117,6 +120,7 @@ fn draw_pet(ivars:&PetIvars) {
     rounded(rect(52.,46.,10.,3.),1.5,&ink);
     oval(rect(34.,47.,9.,5.),&color(0.96,0.62,0.64,0.75));
     oval(rect(73.,47.,9.,5.),&color(0.96,0.62,0.64,0.75));
+    }
     rounded(rect(29.,12.,54.,5.),2.5,&color(0.10,0.13,0.18,0.35));
     if let Some(c)=ivars.context.borrow().as_ref() {
         let fill=if c.percent >= 85. { color(0.96,0.66,0.35,1.) } else { mint.clone() };
@@ -174,13 +178,22 @@ struct AppUi {
 impl AppUi {
     fn new(mtm:MainThreadMarker,delegate:&Delegate,demo:bool,readout:bool) -> Self {
         let screen=rustrect(NSScreen::mainScreen(mtm).expect("a screen is required").visibleFrame());
-        let placement=Placement::new(screen);
+        let prefs=preferences::load();
+        let mut placement=prefs.placement.unwrap_or_else(|| Placement::new(screen));
+        placement.screen=screen_at(Point { x:placement.origin.x+PET_SIZE/2.,y:placement.origin.y+PET_SIZE/2. },mtm);
+        placement.align();
         let pet=panel(mtm,nsrect(placement.frame(false)),"OMP Pet");
         let view=PetView::new(mtm); pet.setContentView(Some(&view));
         view.setAccessibilityElement(true);
         view.setAccessibilityRole(Some(unsafe { NSAccessibilityImageRole }));
         view.setAccessibilityLabel(Some(&NSString::from_str("OMP Pet desktop companion")));
         pet.setAcceptsMouseMovedEvents(true);
+        if let Some(path)=std::env::var_os("OMP_PET_SPRITES").map(std::path::PathBuf::from).or(prefs.sprites) {
+            match SpritePack::load(&path,mtm) {
+                Ok(pack) => *view.ivars().sprites.borrow_mut()=Some(pack),
+                Err(e) => eprintln!("Could not load sprite pack: {e}"),
+            }
+        }
         let card=panel(mtm,rect(0.,0.,320.,190.),"OMP Pet — task readout");
         let content:Retained<CardView>=unsafe { msg_send![CardView::alloc(mtm),initWithFrame:rect(0.,0.,320.,190.)] };
         let mut labels=Vec::new();
@@ -195,7 +208,8 @@ impl AppUi {
         card.setContentView(Some(&content)); card.setHasShadow(true);
         let menu=NSMenu::new(mtm); menu.setAutoenablesItems(false);
         for (title,action) in [("Show task readout",sel!(toggleReadout:)),("Next session",sel!(nextSession:)),
-            ("Tuck / reveal",sel!(toggleTuck:)),("Reset placement",sel!(resetPlacement:)),("Quit OMP Pet",sel!(quit:))] {
+            ("Tuck / reveal",sel!(toggleTuck:)),("Choose sprite pack…",sel!(chooseSprites:)),("Reload sprites",sel!(reloadSprites:)),
+            ("Use built-in sprite",sel!(clearSprites:)),("Reset placement",sel!(resetPlacement:)),("Quit OMP Pet",sel!(quit:))] {
             let item=unsafe { menu.addItemWithTitle_action_keyEquivalent(&NSString::from_str(title),Some(action),&NSString::from_str("")) };
             unsafe { item.setTarget(Some(delegate)) };
         }
@@ -230,15 +244,33 @@ impl AppUi {
         self.sync_animation();
     }
     fn sync_animation(&mut self) {
-        let active=self.sessions.activity().animates() && !self.view.ivars().tucked.get();
+        let activity=self.sessions.activity();
+        let custom=self.view.ivars().sprites.borrow().as_ref().is_some_and(|pack|pack.animated(activity));
+        let active=(activity.animates() || custom) && !self.view.ivars().tucked.get();
         if active && self.animation.is_none() {
-            self.animation=Some(timer(0.33,true,|| with_ui(|ui| {
-                let p=ui.view.ivars().phase.get(); ui.view.ivars().phase.set((p+1)%3);
+            let interval=self.view.ivars().sprites.borrow().as_ref().map_or(0.33,|pack|pack.frame_ms as f64/1000.);
+            self.animation=Some(timer(interval,true,|| with_ui(|ui| {
+                let p=ui.view.ivars().phase.get(); ui.view.ivars().phase.set(p.wrapping_add(1));
                 ui.view.setNeedsDisplay(true);
             })));
         } else if !active {
             if let Some(timer)=self.animation.take() { timer.invalidate(); }
         }
+    }
+    fn save_preferences(&self) {
+        let sprites=self.view.ivars().sprites.borrow().as_ref().map(|pack|pack.path.clone());
+        if let Err(e)=preferences::save(&preferences::Preferences { placement:Some(self.placement),sprites }) {
+            eprintln!("Could not save preferences: {e}");
+        }
+    }
+    fn load_sprites(&mut self,path:&std::path::Path) -> Result<(),String> {
+        let pack=SpritePack::load(path,self.pet.mtm())?;
+        *self.view.ivars().sprites.borrow_mut()=Some(pack);
+        cancel(&mut self.animation); self.refresh(); self.save_preferences(); Ok(())
+    }
+    fn reload_sprites(&mut self) {
+        let path=self.view.ivars().sprites.borrow().as_ref().map(|pack|pack.path.clone());
+        if let Some(path)=path { if let Err(e)=self.load_sprites(&path) { eprintln!("Could not reload sprites: {e}"); } }
     }
     fn install_monitors(&mut self) {
         let mask=NSEventMask::MouseMoved | NSEventMask::LeftMouseDragged;
@@ -268,7 +300,7 @@ impl AppUi {
         let card_hit=self.card.isVisible() && rustrect(self.card.frame()).contains(p);
         // Empty space around the sprite lets clicks reach the application below it.
         let local=Point { x:p.x-self.placement.origin.x,y:p.y-self.placement.origin.y };
-        let sprite_hit=Rect { x:26.,y:27.,w:62.,h:68. }.contains(local)
+        let sprite_hit=Rect { x:16.,y:24.,w:80.,h:76. }.contains(local)
             || Rect { x:77.,y:77.,w:32.,h:23. }.contains(local)
             || Rect { x:29.,y:12.,w:54.,h:5. }.contains(local);
         self.pet.setIgnoresMouseEvents(!sprite_hit);
@@ -310,7 +342,7 @@ impl AppUi {
     fn end_drag(&mut self) {
         if self.drag_offset.take().is_some() {
             self.placement.snap(self.placement.origin,screen_at(cursor(),self.pet.mtm()));
-            self.set_tucked(false); self.pointer_moved();
+            self.set_tucked(false); self.save_preferences(); self.pointer_moved();
         }
     }
     fn show_readout(&self) {
@@ -334,8 +366,41 @@ define_class!(
             UI.with(|slot| *slot.borrow_mut()=Some(ui));
             with_ui(|ui| ui.install_monitors());
         }
+        #[unsafe(method(applicationDidChangeScreenParameters:))]
+        fn screens_changed(&self,_note:&NSNotification) { with_ui(|ui| {
+            ui.placement.screen=screen_at(ui.placement.origin,self.mtm()); ui.placement.align();
+            let tucked=ui.view.ivars().tucked.get(); ui.set_tucked(tucked); ui.save_preferences();
+        }); }
+        #[unsafe(method(applicationWillTerminate:))]
+        fn will_terminate(&self,_note:&NSNotification) { with_ui(|ui| {
+            ui.save_preferences();
+            for monitor in ui.monitors.drain(..) { unsafe { NSEvent::removeMonitor(&monitor) }; }
+        }); }
     }
     impl Delegate {
+        #[unsafe(method(chooseSprites:))]
+        fn choose_sprites(&self,_sender:Option<&AnyObject>) {
+            let picker=NSOpenPanel::openPanel(self.mtm());
+            picker.setCanChooseDirectories(true); picker.setCanChooseFiles(false);
+            picker.setAllowsMultipleSelection(false);
+            picker.setMessage(Some(&NSString::from_str("Choose a sprite pack folder containing manifest.json")));
+            if picker.runModal()==NSModalResponseOK {
+                if let Some(path)=picker.URL().and_then(|url|url.path()) {
+                    let mut failure=None;
+                    with_ui(|ui| { failure=ui.load_sprites(std::path::Path::new(&path.to_string())).err(); });
+                    if let Some(error)=failure {
+                        let alert=NSAlert::new(self.mtm()); alert.setMessageText(&NSString::from_str("Could not load sprite pack"));
+                        alert.setInformativeText(&NSString::from_str(&error)); alert.runModal();
+                    }
+                }
+            }
+        }
+        #[unsafe(method(reloadSprites:))]
+        fn reload_sprites(&self,_sender:Option<&AnyObject>) { with_ui(|ui|ui.reload_sprites()); }
+        #[unsafe(method(clearSprites:))]
+        fn clear_sprites(&self,_sender:Option<&AnyObject>) { with_ui(|ui| {
+            ui.view.ivars().sprites.borrow_mut().take(); cancel(&mut ui.animation); ui.refresh(); ui.save_preferences();
+        }); }
         #[unsafe(method(toggleReadout:))]
         fn toggle_readout(&self,_sender:Option<&AnyObject>) { with_ui(|ui| {
             ui.readout_pinned=!ui.readout_pinned;
@@ -347,12 +412,12 @@ define_class!(
         fn toggle_tuck(&self,_sender:Option<&AnyObject>) { with_ui(|ui| {
             let tucked=!ui.view.ivars().tucked.get();
             if ui.placement.edge.is_none() { ui.placement.edge=Some(crate::geometry::Edge::Right); ui.placement.align(); }
-            ui.readout_pinned=false; ui.set_tucked(tucked);
+            ui.readout_pinned=false; ui.set_tucked(tucked); ui.save_preferences();
         }); }
         #[unsafe(method(resetPlacement:))]
         fn reset_placement(&self,_sender:Option<&AnyObject>) { with_ui(|ui| {
             ui.placement=Placement::new(rustrect(NSScreen::mainScreen(self.mtm()).unwrap().visibleFrame()));
-            ui.set_tucked(false); ui.refresh();
+            ui.set_tucked(false); ui.refresh(); ui.save_preferences();
         }); }
         #[unsafe(method(quit:))]
         fn quit(&self,_sender:Option<&AnyObject>) { NSApplication::sharedApplication(self.mtm()).terminate(None); }
@@ -376,7 +441,7 @@ pub fn event(event:Event) {
                     ui.placement=Placement::new(screen_at(cursor(),ui.pet.mtm())); ui.set_tucked(false);
                 }
                 Control::NextSession => ui.sessions.cycle(),
-                Control::ReloadSprites => {},
+                Control::ReloadSprites => ui.reload_sprites(),
             },
         }
         ui.refresh();
