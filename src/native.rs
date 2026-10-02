@@ -449,7 +449,8 @@ define_class!(
 
 pub fn event(event:Event) {
     // terminate synchronously invokes applicationWillTerminate; release UI borrows first.
-    if matches!(event,Event::Control(Control::Quit)) {
+    if let Event::Control(Control::Quit,reply)=event {
+        let _=reply.send("{\"ok\":true}".into());
         NSApplication::sharedApplication(MainThreadMarker::new().unwrap()).terminate(None);
         return;
     }
@@ -457,7 +458,9 @@ pub fn event(event:Event) {
         match event {
             Event::Snapshot(connection,snapshot) => { ui.sessions.update(connection,snapshot); }
             Event::Disconnected(connection) => ui.sessions.disconnect(connection),
-            Event::Control(control) => match control {
+            Event::Control(control,reply) => {
+                let mut error=None;
+                match control {
                 Control::Quit => unreachable!("handled before borrowing UI"),
                 Control::Readout => { ui.readout_pinned=true; ui.set_tucked(false); ui.show_readout(); }
                 Control::Tuck => {
@@ -470,6 +473,17 @@ pub fn event(event:Event) {
                 }
                 Control::NextSession => ui.sessions.cycle(),
                 Control::ReloadSprites => ui.reload_sprites(),
+                Control::LoadSprites { path } => error=ui.load_sprites(&path).err(),
+                Control::Status => {},
+                }
+                let status=serde_json::json!({"ok":error.is_none(),"error":error,"pid":std::process::id(),
+                    "tucked":ui.view.ivars().tucked.get(),"readout":ui.card.isVisible(),
+                    "frame":rustrect(ui.pet.frame()),"activity":ui.sessions.activity(),
+                    "sprites":ui.view.ivars().sprites.borrow().as_ref().map(|p|p.path.clone()),
+                    "accent":ui.view.ivars().sprites.borrow().as_ref().map(|p|p.accent),
+                    "movable":ui.pet.isMovable(),"size_locked":ui.pet.contentMinSize()==ui.pet.contentMaxSize(),
+                    "tiling_excluded":ui.pet.collectionBehavior().contains(NSWindowCollectionBehavior::FullScreenDisallowsTiling)});
+                let _=reply.send(status.to_string());
             },
         }
         ui.refresh();

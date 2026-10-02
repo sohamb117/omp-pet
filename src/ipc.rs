@@ -5,10 +5,10 @@ use crate::model::Snapshot;
 
 pub const MAX_FRAME: usize = 8192;
 #[derive(Debug)]
-pub enum Event { Snapshot(u64, Snapshot), Disconnected(u64), Control(Control) }
+pub enum Event { Snapshot(u64, Snapshot), Disconnected(u64), Control(Control, std::sync::mpsc::SyncSender<String>) }
 #[derive(Debug, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum Control { Quit, Readout, Tuck, Reveal, ResetPlacement, NextSession, ReloadSprites }
+pub enum Control { Quit, Readout, Tuck, Reveal, ResetPlacement, NextSession, ReloadSprites, Status, LoadSprites { path:PathBuf } }
 #[derive(Debug, serde::Deserialize)]
 #[serde(untagged)]
 pub enum Message { Snapshot(Snapshot), Control { control: Control } }
@@ -61,7 +61,16 @@ impl Server {
                     loop {
                         match read_message(&mut reader) {
                             Ok(Some(Message::Snapshot(snapshot))) => deliver(Event::Snapshot(id, snapshot)),
-                            Ok(Some(Message::Control { control })) => deliver(Event::Control(control)),
+                            Ok(Some(Message::Control { control })) => {
+                                let (send,receive)=std::sync::mpsc::sync_channel(1);
+                                deliver(Event::Control(control,send));
+                                if let Ok(response)=receive.recv_timeout(std::time::Duration::from_secs(2)) {
+                                    use std::io::Write;
+                                    let stream=reader.get_mut();
+                                    let _=stream.set_write_timeout(Some(std::time::Duration::from_secs(1)));
+                                    let _=stream.write_all(format!("{response}\n").as_bytes());
+                                }
+                            },
                             Ok(None) | Err(_) => break,
                         }
                     }
