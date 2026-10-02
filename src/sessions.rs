@@ -80,6 +80,10 @@ impl Sessions {
         self.selected = Some(keys[(index + 1) % keys.len()].clone());
     }
 
+    pub fn has_connected(&self) -> bool {
+        self.entries.values().any(|s| s.connected)
+    }
+
     pub fn needs_attention(&self) -> bool {
         self.entries.values().any(|s| {
             s.connected && !matches!(s.snapshot.activity, Activity::Idle | Activity::Disconnected)
@@ -127,6 +131,9 @@ mod tests {
         }
         sessions.disconnect(2);
         assert!(!sessions.needs_attention());
+        assert!(sessions.has_connected());
+        sessions.disconnect(1);
+        assert!(!sessions.has_connected());
     }
     #[test]
     fn reconnect_accepts_reset_sequence_and_old_socket_cannot_clobber_it() {

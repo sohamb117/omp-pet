@@ -42,7 +42,7 @@ Use the menu-bar **π** or right-click the pet for readout, session switching, a
 /pet status                  # show native status
 ```
 
-After five continuous minutes without a connected session working or needing attention, the pet sleeps. Idle heartbeats do not reset the countdown; working, compacting, approval requests, and errors in any connected session keep it awake. Work wakes it immediately. The countdown uses one one-shot timer, not polling. Sleep frames are capped at one per second and never faster than the pack's slowest idle frame; packs with static idle images use a still sleep pose. The native cat closes its eyes without an animation timer, and tucked pets never animate. `/pet status` includes `sleeping` and `sleep_timer_pending` for inspection.
+The pet sleeps immediately when no OMP session is connected, including at app startup. While connected, it sleeps after one continuous minute without work or anything needing attention. Reconnecting starts a fresh idle minute. Idle heartbeats do not reset the countdown; working, compacting, approval requests, and errors in any connected session keep it awake. Work wakes it immediately. The countdown uses one one-shot timer, not polling. Sleep frames are capped at one per second and never faster than the pack's slowest idle frame; packs with static idle images use a still sleep pose. The native cat closes its eyes without an animation timer, and tucked pets never animate. `/pet status` includes `sleeping` and `sleep_timer_pending` for inspection.
 
 ## Custom sprites
 

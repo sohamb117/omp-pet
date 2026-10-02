@@ -436,9 +436,11 @@ impl AppUi {
         ui
     }
     fn refresh(&mut self) {
-        let remaining = self
-            .idle_sleep
-            .remaining(self.sessions.needs_attention(), std::time::Instant::now());
+        let remaining = self.idle_sleep.remaining(
+            self.sessions.has_connected(),
+            self.sessions.needs_attention(),
+            std::time::Instant::now(),
+        );
         let sleeping = remaining == Some(std::time::Duration::ZERO);
         match remaining {
             None | Some(std::time::Duration::ZERO) => cancel(&mut self.sleep_timer),
