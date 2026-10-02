@@ -1,3 +1,5 @@
+mod model;
+
 fn main() {
-    println!("OMP Pet: native macOS companion coming online.");
+    println!("OMP Pet: {}", model::Snapshot::demo().activity.label());
 }
