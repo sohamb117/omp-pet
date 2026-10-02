@@ -127,7 +127,7 @@ define_class!(
         #[unsafe(method(drawRect:))]
         fn draw(&self, _rect: NSRect) {
             let c=self.ivars().accent.get();
-            rounded(self.bounds(),8.,&color(c[0] as f64/255.*0.45,c[1] as f64/255.*0.45,c[2] as f64/255.*0.45,1.));
+            rounded(self.bounds(),8.,&color(c[0] as f64/255.*0.45,c[1] as f64/255.*0.45,c[2] as f64/255.*0.45,0.70));
         }
     }
 );
@@ -816,15 +816,10 @@ impl AppUi {
         let gap = 4.;
         let width = 200. * k;
         let height = 76. * k;
-        let x = if p.x - width - gap >= screen.x {
-            p.x - width - gap
-        } else {
-            p.x + self.placement.size + gap
-        };
         let origin = screen.clamp(
             Point {
-                x,
-                y: p.y + self.placement.size - height,
+                x: p.x + (self.placement.size - width) / 2.,
+                y: p.y + self.placement.size + gap,
             },
             width,
             height,
