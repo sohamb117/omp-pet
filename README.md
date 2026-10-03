@@ -7,7 +7,7 @@ A macOS desktop pet built in Rust with native AppKit. A small TypeScript oh-my-p
 On an Apple Silicon Mac with OMP installed:
 
 ```sh
-omp plugin install 'github:sohamb117/omp-pet#v0.1.1'
+omp plugin install 'github:sohamb117/omp-pet#v0.1.2'
 ```
 
 Start OMP (or run `/reload-plugins` in an existing session), then:
@@ -44,6 +44,14 @@ Use the menu-bar **π** or right-click the pet for readout, session switching, a
 ```
 
 The pet sleeps immediately when no OMP session is connected, including at app startup. While connected, it sleeps after one continuous minute without work or anything needing attention. Reconnecting starts a fresh idle minute. Idle heartbeats do not reset the countdown; working, compacting, approval requests, and errors in any connected session keep it awake. Work wakes it immediately. The countdown uses one one-shot timer, not polling. Sleep frames are capped at one per second and never faster than the pack's slowest idle frame; packs with static idle images use a still sleep pose. The native cat closes its eyes without an animation timer, and tucked pets never animate. `/pet status` includes `sleeping` and `sleep_timer_pending` for inspection.
+
+## Adopt from Morisoba
+
+OMP Pet 0.1.2 registers the `omppet://` URL scheme. After `/pet show` has opened the app once, an **Adopt in OMP Pet** link on Morisoba can download and activate a sprite pack directly. For upgrades, quit an older running companion before `/pet show`.
+
+Accepted sources are HTTPS endpoints on `morisoba.moe`, `www.morisoba.moe`, and `pets.morisoba.moe`, plus explicit loopback HTTP ports for development. The URL identifies a catalog entry and direction and includes a SHA-256 digest. Downloading and archive extraction run off the main thread, with time and size limits. The importer accepts only flat PNG/manifest/credit files, rejects traversal, duplicate paths and symlinks, verifies the digest, and uses the normal sprite validator before switching. Prior sprite preferences survive failures. Downloaded packs are stored under `~/Library/Application Support/OMP Pet/packs/<sha256>/`; no Pokémon art is added to the app bundle.
+
+`omp-pet --check-pack /path/to/folder` validates a generated pack using the native image loader without launching the desktop pet. The site lives in a separate project; the app does not depend on it for normal operation or local sprite loading.
 
 ## Custom sprites
 

@@ -292,6 +292,50 @@ mod tests {
         );
     }
     #[test]
+    fn installs_from_loopback_and_reuses_complete_cache() {
+        use std::net::TcpListener;
+        let mut zip = zip::ZipWriter::new(Cursor::new(Vec::new()));
+        zip.start_file("manifest.json", zip::write::SimpleFileOptions::default())
+            .unwrap();
+        zip.write_all(br#"{"version":1,"idle":["Idle.png"]}"#)
+            .unwrap();
+        zip.start_file("Idle.png", zip::write::SimpleFileOptions::default())
+            .unwrap();
+        zip.write_all(b"test fixture: image decoding is covered by --check-pack")
+            .unwrap();
+        let bytes = zip.finish().unwrap().into_inner();
+        let sha256 = format!("{:x}", Sha256::digest(&bytes));
+        let server = TcpListener::bind("127.0.0.1:0").unwrap();
+        let url = format!(
+            "http://127.0.0.1:{}/api/packs/0570?direction=1",
+            server.local_addr().unwrap().port()
+        );
+        let worker = std::thread::spawn(move || {
+            let (mut socket, _) = server.accept().unwrap();
+            socket
+                .set_read_timeout(Some(std::time::Duration::from_secs(5)))
+                .unwrap();
+            let mut buf = [0; 4096];
+            let _ = socket.read(&mut buf).unwrap();
+            write!(
+                socket,
+                "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                bytes.len()
+            )
+            .unwrap();
+            socket.write_all(&bytes).unwrap();
+        });
+        let root = Staging(
+            std::env::temp_dir().join(format!("omp-pet-install-test-{}", std::process::id())),
+        );
+        let link = InstallLink { url, sha256 };
+        let path = install(&link, &root.0).unwrap();
+        worker.join().unwrap();
+        assert!(path.join("manifest.json").is_file());
+        assert_eq!(install(&link, &root.0).unwrap(), path);
+        assert_eq!(fs::read_dir(&root.0).unwrap().count(), 1);
+    }
+    #[test]
     fn rejects_executables_and_nested_paths() {
         for name in ["pet.sh", "x/Idle.png", "/Idle.png", "..\\Idle.png", ".png"] {
             assert!(!allowed_file(name));
