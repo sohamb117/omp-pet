@@ -14,8 +14,8 @@ use objc2::runtime::{AnyObject, ProtocolObject};
 use objc2::{DefinedClass, MainThreadOnly, define_class, msg_send, sel};
 use objc2_app_kit::*;
 use objc2_foundation::{
-    MainThreadMarker, NSNotification, NSObject, NSObjectProtocol, NSPoint, NSRect, NSSize,
-    NSString, NSTimer,
+    MainThreadMarker, NSArray, NSNotification, NSObject, NSObjectProtocol, NSPoint, NSRect, NSSize,
+    NSString, NSTimer, NSURL,
 };
 use std::{
     cell::{Cell, RefCell},
@@ -887,6 +887,13 @@ define_class!(
     struct Delegate;
     unsafe impl NSObjectProtocol for Delegate {}
     unsafe impl NSApplicationDelegate for Delegate {
+        #[unsafe(method(application:openURLs:))]
+        fn open_urls(&self, _application: &NSApplication, urls: &NSArray<NSURL>) {
+            // One user action at a time; a URL cannot queue unbounded downloads.
+            if let Some(url) = urls.firstObject().and_then(|url| url.absoluteString()) {
+                install_from_link(&url.to_string());
+            }
+        }
         #[unsafe(method(applicationDidFinishLaunching:))]
         fn did_finish_launching(&self,_note:&NSNotification) {
             let ui=AppUi::new(self.mtm(),self,self.ivars().0,self.ivars().1);
@@ -933,6 +940,50 @@ fn format_count(n: u64) -> String {
         out.push(c);
     }
     out
+}
+
+fn install_from_link(url: &str) {
+    use std::sync::atomic::{AtomicBool, Ordering};
+    static BUSY: AtomicBool = AtomicBool::new(false);
+    let link = match crate::install::InstallLink::parse(url) {
+        Ok(link) => link,
+        Err(error) => {
+            install_error(&error);
+            return;
+        }
+    };
+    if BUSY.swap(true, Ordering::SeqCst) {
+        return;
+    }
+    std::thread::spawn(move || {
+        let result = crate::install::install(&link, &crate::install::pack_root());
+        dispatch2::DispatchQueue::main().exec_async(move || {
+            let mut result = result
+                .map(|path| {
+                    let mut loaded =
+                        Err("Pet is not ready. Please try the install link again.".to_string());
+                    with_ui(|ui| {
+                        loaded = ui.load_sprites(&path);
+                        if loaded.is_ok() {
+                            ui.set_tucked(false);
+                            ui.pet.orderFrontRegardless();
+                        }
+                    });
+                    loaded
+                })
+                .and_then(|value| value);
+            BUSY.store(false, Ordering::SeqCst);
+            if let Err(error) = &mut result {
+                install_error(error);
+            }
+        });
+    });
+}
+fn install_error(error: &str) {
+    let alert = NSAlert::new(MainThreadMarker::new().unwrap());
+    alert.setMessageText(&NSString::from_str("Could not adopt this pet"));
+    alert.setInformativeText(&NSString::from_str(error));
+    alert.runModal();
 }
 
 fn choose_sprites(mtm: MainThreadMarker) {

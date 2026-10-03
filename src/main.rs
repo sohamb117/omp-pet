@@ -1,5 +1,6 @@
 mod geometry;
 mod hover;
+mod install;
 mod ipc;
 mod metrics;
 mod model;
@@ -14,8 +15,27 @@ fn main() {
     let args: Vec<_> = std::env::args().skip(1).collect();
     if args.iter().any(|s| s == "--help" || s == "-h") {
         println!(
-            "OMP Pet\n\ncargo run -- [--demo] [--readout]\n\nOMP_PET_SOCKET overrides the local socket path."
+            "OMP Pet\n\ncargo run -- [--demo] [--readout]\n      omp-pet --check-pack <folder>\n\nOMP_PET_SOCKET overrides the local socket path."
         );
+        return;
+    }
+    if args.first().is_some_and(|s| s == "--check-pack") {
+        let result = args
+            .get(1)
+            .ok_or_else(|| "Usage: omp-pet --check-pack <folder>".to_string())
+            .and_then(|path| {
+                sprites::SpritePack::load(
+                    std::path::Path::new(path),
+                    objc2_foundation::MainThreadMarker::new().unwrap(),
+                )
+            });
+        match result {
+            Ok(_) => println!("Sprite pack is valid"),
+            Err(error) => {
+                eprintln!("{error}");
+                std::process::exit(1);
+            }
+        }
         return;
     }
     let path = ipc::socket_path();
