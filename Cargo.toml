@@ -1,6 +1,6 @@
 [package]
 name = "omp-pet"
-version = "0.1.2"
+version = "0.1.3"
 edition = "2024"
 description = "A small native macOS desktop companion for oh-my-pi"
 license = "MIT"

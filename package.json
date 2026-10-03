@@ -1,6 +1,6 @@
 {
   "name": "omp-pet",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "private": true,
   "description": "Native macOS pet companion and oh-my-pi event bridge",
   "type": "module",

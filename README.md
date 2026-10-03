@@ -7,7 +7,7 @@ A macOS desktop pet built in Rust with native AppKit. A small TypeScript oh-my-p
 On an Apple Silicon Mac with OMP installed:
 
 ```sh
-omp plugin install 'github:sohamb117/omp-pet#v0.1.2'
+omp plugin install 'github:sohamb117/omp-pet#v0.1.3'
 ```
 
 Start OMP (or run `/reload-plugins` in an existing session), then:
@@ -49,7 +49,7 @@ The pet sleeps immediately when no OMP session is connected, including at app st
 
 OMP Pet 0.1.2 registers the `omppet://` URL scheme. After `/pet show` has opened the app once, an **Adopt in OMP Pet** link on Morisoba can download and activate a sprite pack directly. For upgrades, quit an older running companion before `/pet show`.
 
-Accepted sources are HTTPS endpoints on `morisoba.moe`, `www.morisoba.moe`, and `pets.morisoba.moe`, plus explicit loopback HTTP ports for development. The URL identifies a catalog entry and direction and includes a SHA-256 digest. Downloading and archive extraction run off the main thread, with time and size limits. The importer accepts only flat PNG/manifest/credit files, rejects traversal, duplicate paths and symlinks, verifies the digest, and uses the normal sprite validator before switching. Prior sprite preferences survive failures. Downloaded packs are stored under `~/Library/Application Support/OMP Pet/packs/<sha256>/`; no Pokémon art is added to the app bundle.
+Accepted sources are HTTPS endpoints on `morisoba.moe`, `www.morisoba.moe`, and `pets.morisoba.moe`, and `ompoke.morisoba.moe` (0.1.3+), plus explicit loopback HTTP ports for development. The URL identifies a catalog entry and direction and includes a SHA-256 digest. Downloading and archive extraction run off the main thread, with time and size limits. The importer accepts only flat PNG/manifest/credit files, rejects traversal, duplicate paths and symlinks, verifies the digest, and uses the normal sprite validator before switching. Prior sprite preferences survive failures. Downloaded packs are stored under `~/Library/Application Support/OMP Pet/packs/<sha256>/`; no Pokémon art is added to the app bundle.
 
 `omp-pet --check-pack /path/to/folder` validates a generated pack using the native image loader without launching the desktop pet. The site lives in a separate project; the app does not depend on it for normal operation or local sprite loading.
 

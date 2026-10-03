@@ -68,7 +68,10 @@ fn validate_url(url: &str) -> Result<(), String> {
         .ok_or("Invalid pack endpoint")?;
     let trusted = matches!(
         origin,
-        "https://morisoba.moe" | "https://www.morisoba.moe" | "https://pets.morisoba.moe"
+        "https://morisoba.moe"
+            | "https://www.morisoba.moe"
+            | "https://pets.morisoba.moe"
+            | "https://ompoke.morisoba.moe"
     );
     // Development links are confined to numeric loopback ports, never arbitrary HTTP hosts.
     let local = origin
@@ -238,6 +241,18 @@ mod tests {
     }
     #[test]
     fn accepts_only_constrained_pack_links() {
+        assert!(
+            InstallLink::parse(&link(
+                "https://ompoke.morisoba.moe/api/packs/0570?direction=1"
+            ))
+            .is_ok()
+        );
+        assert!(
+            InstallLink::parse(&link(
+                "https://ompoke.morisoba.moe.evil.com/api/packs/0570?direction=1"
+            ))
+            .is_err()
+        );
         assert!(
             InstallLink::parse(&link(
                 "https%3A%2F%2Fmorisoba.moe%2Fapi%2Fpacks%2F0570-0001%3Fdirection%3D1"
